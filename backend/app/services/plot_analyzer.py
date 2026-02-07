@@ -87,7 +87,7 @@ class PlotAnalyzer:
         )
         
         last_error = None
-        
+        logger.debug(f"章节分析提示词{prompt}")
         for attempt in range(1, max_retries + 1):
             try:
                 # 调用AI进行分析

@@ -1211,6 +1211,15 @@ class ForeshadowService:
                                 # 重新获取完整的伏笔对象
                                 existing = await self.get_foreshadow(db, existing.get('id'))
                         
+                        # 检查伏笔是否已被回收（防止重复回收）
+                        if existing:
+                            if existing.status == "resolved" and existing.actual_resolve_chapter_number == chapter_number:
+                                logger.info(f"ℹ️ 伏笔已在本章回收过，跳过: {existing.title}")
+                                continue
+                            elif existing.status == "resolved":
+                                logger.warning(f"⚠️ 伏笔已在第{existing.actual_resolve_chapter_number}章回收，跳过: {existing.title}")
+                                continue
+                        
                         # 执行回收
                         if existing and existing.status == "planted":
                             # 更新为已回收状态
@@ -1224,20 +1233,42 @@ class ForeshadowService:
                                 existing.resolution_text = fs_data.get("content")
                             
                             await db.flush()
+                            await db.refresh(existing)
+                            
                             stats["resolved_count"] += 1
                             stats["updated_ids"].append(existing.id)
                             if matched_by_content:
                                 stats["matched_by_content"] += 1
-                            logger.info(f"✅ 自动回收伏笔: {existing.title} (ID: {existing.id})")
+                            logger.info(f"✅ 自动回收伏笔: {existing.title} (ID: {existing.id}, status: {existing.status})")
                             
                             # 从待匹配列表中移除已回收的伏笔
                             planted_foreshadows = [f for f in planted_foreshadows if f['id'] != existing.id]
                         elif existing:
                             logger.warning(f"⚠️ 伏笔状态不是planted，跳过回收: {existing.title} (status: {existing.status})")
                         else:
+                            # 创建新回收记录（未能匹配到已埋入伏笔）
                             fs_title = fs_data.get("title", fs_data.get("content", "")[:30])
-                            logger.warning(f"⚠️ 未能匹配到已埋入伏笔，创建新的回收记录: {fs_title}")
                             reference_chapter = fs_data.get("reference_chapter")
+                            
+                            # 检查是否已存在相同的回收记录（防止重复创建）
+                            duplicate_check = await db.execute(
+                                select(Foreshadow).where(
+                                    and_(
+                                        Foreshadow.project_id == project_id,
+                                        Foreshadow.title == fs_title,
+                                        Foreshadow.actual_resolve_chapter_number == chapter_number,
+                                        Foreshadow.source_type == "analysis",
+                                        Foreshadow.status == "resolved"
+                                    )
+                                )
+                            )
+                            duplicate_fs = duplicate_check.scalar_one_or_none()
+                            
+                            if duplicate_fs:
+                                logger.info(f"ℹ️ 已存在相同的回收记录，跳过: {fs_title}")
+                                continue
+                            
+                            logger.warning(f"⚠️ 未能匹配到已埋入伏笔，创建新的回收记录: {fs_title}")
                             new_resolved_foreshadow = Foreshadow(
                                 id=str(uuid.uuid4()),
                                 project_id=project_id,
@@ -1286,32 +1317,46 @@ class ForeshadowService:
                         fs_index = analysis_foreshadows.index(fs_data)
                         source_memory_id = f"analysis_{analysis_id}_{fs_index}"
                         
-                        # 检查是否已存在（可能已经通过 sync_from_analysis 创建）
+                        # 检查是否已存在（防止重复分析创建重复记录）
                         existing_check = await db.execute(
                             select(Foreshadow).where(
-                                and_(
-                                    Foreshadow.project_id == project_id,
-                                    Foreshadow.source_memory_id == source_memory_id
+                                or_(
+                                    # 方式1：通过source_memory_id精确匹配
+                                    and_(
+                                        Foreshadow.project_id == project_id,
+                                        Foreshadow.source_memory_id == source_memory_id
+                                    ),
+                                    # 方式2：通过标题+章节号匹配
+                                    and_(
+                                        Foreshadow.project_id == project_id,
+                                        Foreshadow.title == fs_title,
+                                        Foreshadow.plant_chapter_number == chapter_number,
+                                        Foreshadow.source_type == "analysis",
+                                        Foreshadow.status == "planted"
+                                    )
                                 )
                             )
                         )
                         existing_fs = existing_check.scalar_one_or_none()
                         
                         if existing_fs:
+                            # 更新已存在的伏笔，避免重复创建
                             existing_fs.title = fs_title
                             existing_fs.content = fs_data.get("content", existing_fs.content)
                             existing_fs.strength = fs_data.get("strength", existing_fs.strength)
                             existing_fs.subtlety = fs_data.get("subtlety", existing_fs.subtlety)
                             existing_fs.hint_text = fs_data.get("keyword", existing_fs.hint_text)
                             existing_fs.target_resolve_chapter_number = fs_data.get("estimated_resolve_chapter", existing_fs.target_resolve_chapter_number)
+                            # 确保source_memory_id是最新的
+                            existing_fs.source_memory_id = source_memory_id
+                            existing_fs.source_analysis_id = analysis_id
                             await db.flush()
-                            logger.info(f"📝 更新已存在伏笔（避免重复）: {fs_title}")
+                            logger.info(f"📝 更新已存在伏笔（避免重复）: {fs_title} (ID: {existing_fs.id})")
                         else:
-                            # 创建新伏笔（使用统一的标识符格式）
-                            # 🔧 修复Bug#7：如果AI没有填写estimated_resolve_chapter，提供合理的默认值
+                            # 创建新伏笔
                             estimated_resolve = fs_data.get("estimated_resolve_chapter")
                             if estimated_resolve is None:
-                                # 根据伏笔类型和长线属性计算默认回收章节
+                                # 根据伏笔类型计算默认回收章节
                                 if fs_data.get("is_long_term", False):
                                     estimated_resolve = chapter_number + 15
                                 else:
@@ -1455,11 +1500,12 @@ class ForeshadowService:
         通过内容相似度匹配伏笔（备用机制）
         
         匹配策略（按优先级）：
-        1. 标题完全匹配
+        1. 标题完全匹配（权重最高）
         2. 标题部分匹配（包含关系）
-        3. 关键词匹配
-        4. 内容关键词匹配
-        5. 相关角色匹配 + 分类匹配
+        3. 标题关键词匹配（去除"回收"等后缀）
+        4. 关键词匹配
+        5. 内容关键词匹配
+        6. 相关角色匹配 + 分类匹配
         
         Args:
             resolved_fs_data: 分析结果中的回收伏笔数据
@@ -1479,6 +1525,14 @@ class ForeshadowService:
         resolved_characters = set(resolved_fs_data.get("related_characters", []))
         reference_chapter = resolved_fs_data.get("reference_chapter")
         
+        # 处理标题后缀（兜底机制）
+        resolved_title_clean = resolved_title
+        for suffix in ["回收", "揭示", "解答", "兑现"]:
+            if resolved_title.endswith(suffix):
+                resolved_title_clean = resolved_title[:-len(suffix)]
+                logger.debug(f"🔍 去除标题后缀: '{resolved_title}' -> '{resolved_title_clean}'")
+                break
+        
         best_match = None
         best_score = 0.0
         
@@ -1490,17 +1544,25 @@ class ForeshadowService:
             fs_characters = set(fs.get("related_characters", []))
             fs_plant_chapter = fs.get("plant_chapter_number")
             
-            # 策略1: 标题完全匹配（最高分）
+            # 策略1: 标题匹配
             if resolved_title and fs_title:
                 if resolved_title == fs_title:
                     score = 1.0
+                    logger.debug(f"🎯 标题完全匹配: '{resolved_title}' == '{fs_title}'")
+                elif resolved_title_clean and resolved_title_clean == fs_title:
+                    score = 0.95
+                    logger.debug(f"🎯 清理标题匹配: '{resolved_title_clean}' == '{fs_title}'")
                 elif resolved_title in fs_title or fs_title in resolved_title:
-                    # 标题包含关系
                     score = max(score, 0.8)
+                    logger.debug(f"🔍 标题包含匹配: '{resolved_title}' <-> '{fs_title}'")
+                elif resolved_title_clean and (resolved_title_clean in fs_title or fs_title in resolved_title_clean):
+                    score = max(score, 0.75)
+                    logger.debug(f"🔍 清理标题包含匹配: '{resolved_title_clean}' <-> '{fs_title}'")
                 else:
-                    # 计算标题词重叠
                     title_overlap = self._calculate_word_overlap(resolved_title, fs_title)
                     score = max(score, title_overlap * 0.7)
+                    if title_overlap > 0.3:
+                        logger.debug(f"📊 标题词重叠: overlap={title_overlap:.2f}")
             
             # 策略2: 关键词匹配
             if resolved_keyword and fs_content:

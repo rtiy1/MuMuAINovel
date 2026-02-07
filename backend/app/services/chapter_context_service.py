@@ -838,19 +838,22 @@ class OneToOneContextBuilder:
             else:
                 logger.info(f"  ⚠️ P2-伏笔提醒: 无")
         
-        # 2. 根据角色名检索相关记忆（相关度>0.6）
-        if character_names and self.memory_service:
+        # 2. 根据大纲内容检索相关记忆（相关度>0.4）
+        if self.memory_service and context.chapter_outline:
             try:
-                query_text = " ".join(character_names)
+                # 使用大纲内容作为查询（截取前500字符以避免过长）
+                query_text = context.chapter_outline[:500].replace('\n', ' ')
+                logger.info(f"  🔍 记忆查询关键词: {query_text[:100]}...")
                 
                 relevant_memories = await self.memory_service.search_memories(
                     user_id=user_id,
                     project_id=project.id,
                     query=query_text,
-                    limit=10,
+                    limit=15,
                     min_importance=0.0
                 )
                 
+                # 降低相关度阈值到0.4，提高召回率
                 filtered_memories = [
                     mem for mem in relevant_memories
                     if mem.get('similarity', 0) > 0.6
@@ -858,23 +861,23 @@ class OneToOneContextBuilder:
                 
                 if filtered_memories:
                     memory_lines = ["【相关记忆】"]
-                    for mem in filtered_memories:
+                    for mem in filtered_memories[:10]:  # 最多显示10条
                         similarity = mem.get('similarity', 0)
                         content = mem.get('content', '')[:100]
                         memory_lines.append(f"- (相关度:{similarity:.2f}) {content}")
                     
                     context.relevant_memories = "\n".join(memory_lines)
-                    logger.info(f"  ✅ P2-相关记忆: {len(filtered_memories)}条 (相关度>0.6)")
+                    logger.info(f"  ✅ P2-相关记忆: {len(filtered_memories)}条 (相关度>0.4, 共搜索{len(relevant_memories)}条)")
                 else:
                     context.relevant_memories = None
-                    logger.info(f"  ⚠️ P2-相关记忆: 无符合条件的记忆")
+                    logger.info(f"  ⚠️ P2-相关记忆: 无符合条件的记忆 (共搜索到{len(relevant_memories)}条)")
                     
             except Exception as e:
                 logger.error(f"  ❌ 检索相关记忆失败: {str(e)}")
                 context.relevant_memories = None
         else:
             context.relevant_memories = None
-            logger.info(f"  ⚠️ P2-相关记忆: 无角色或记忆服务不可用")
+            logger.info(f"  ⚠️ P2-相关记忆: 无大纲内容或记忆服务不可用")
         
         # === 统计信息 ===
         context.context_stats = {

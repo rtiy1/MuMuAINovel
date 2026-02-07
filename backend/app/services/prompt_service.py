@@ -972,12 +972,17 @@ class PromptService:
 
 每个伏笔需要：
 - **title**：简洁标题（10-20字，概括伏笔核心）
+  - ⚠️ 回收伏笔时，标题应与原伏笔标题保持一致，不要添加"回收"等后缀
+  - 例如：原伏笔标题是"绿头发的视觉符号"，回收时标题仍为"绿头发的视觉符号"，而非"绿头发的视觉符号回收"
 - **content**：详细描述伏笔内容和预期作用
 - **type**：planted（埋下）或 resolved（回收）
 - **strength**：强度1-10（对读者的吸引力）
 - **subtlety**：隐藏度1-10（越高越隐蔽）
 - **reference_chapter**：回收时引用的原埋入章节号，埋下时为null
 - **reference_foreshadow_id**：【回收时必填】被回收伏笔的ID（从已埋入伏笔列表中选择），埋下时为null
+  - 🔴 重要：回收伏笔时，必须从【已埋入伏笔列表】中找到对应的伏笔ID并填写
+  - 如果列表中有标注【ID: xxx】的伏笔，回收时必须使用该ID
+  - 如果无法确定是哪个伏笔，才填写null（但应尽量避免）
 - **keyword**：【必填】从原文逐字复制8-25字的定位文本
 - **category**：分类（identity=身世/mystery=悬念/item=物品/relationship=关系/event=事件/ability=能力/prophecy=预言）
 - **is_long_term**：是否长线伏笔（跨10章以上回收为true）

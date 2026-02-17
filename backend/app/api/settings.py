@@ -31,10 +31,22 @@ router = APIRouter(prefix="/settings", tags=["设置管理"])
 
 def read_env_defaults() -> Dict[str, Any]:
     """从.env文件读取默认配置（仅读取，不修改）"""
+    provider = app_settings.default_ai_provider or "openai"
+    provider_api_keys = {
+        "openai": app_settings.openai_api_key,
+        "anthropic": app_settings.anthropic_api_key,
+        "gemini": app_settings.gemini_api_key,
+    }
+    provider_base_urls = {
+        "openai": app_settings.openai_base_url,
+        "anthropic": app_settings.anthropic_base_url,
+        "gemini": app_settings.gemini_base_url,
+    }
+
     return {
-        "api_provider": app_settings.default_ai_provider,
-        "api_key": app_settings.openai_api_key or app_settings.anthropic_api_key or "",
-        "api_base_url": app_settings.openai_base_url or app_settings.anthropic_base_url or "",
+        "api_provider": provider,
+        "api_key": provider_api_keys.get(provider) or app_settings.openai_api_key or app_settings.anthropic_api_key or app_settings.gemini_api_key or "",
+        "api_base_url": provider_base_urls.get(provider) or app_settings.openai_base_url or app_settings.anthropic_base_url or app_settings.gemini_base_url or "",
         "llm_model": app_settings.default_model,
         "temperature": app_settings.default_temperature,
         "max_tokens": app_settings.default_max_tokens,
@@ -291,7 +303,8 @@ async def get_available_models(
         async with httpx.AsyncClient(timeout=10.0) as client:
             if provider == "openai" or provider == "azure" or provider == "custom":
                 # OpenAI 兼容接口获取模型列表
-                url = f"{api_base_url.rstrip('/')}/models"
+                normalized_base = api_base_url.rstrip("/")
+                url = normalized_base if normalized_base.endswith("/models") else f"{normalized_base}/models"
                 headers = {
                     "Authorization": f"Bearer {api_key}",
                     "Content-Type": "application/json"
@@ -330,12 +343,46 @@ async def get_available_models(
                 
             elif provider == "anthropic":
                 # Anthropic models API
-                url = f"{api_base_url.rstrip('/')}/v1/models"
                 headers = {"x-api-key": api_key, "anthropic-version": "2023-06-01"}
-                response = await client.get(url, headers=headers)
-                response.raise_for_status()
-                data = response.json()
-                models = [{"value": m["id"], "label": m["id"], "description": m.get("display_name", "")} for m in data.get("data", [])]
+                normalized_base = api_base_url.rstrip("/")
+                if normalized_base.endswith("/v1/models") or normalized_base.endswith("/models"):
+                    candidate_urls = [normalized_base]
+                elif normalized_base.endswith("/v1"):
+                    candidate_urls = [f"{normalized_base}/models", f"{normalized_base.rsplit('/v1', 1)[0]}/models"]
+                else:
+                    candidate_urls = [f"{normalized_base}/v1/models", f"{normalized_base}/models"]
+
+                last_http_error = None
+                models = []
+                for idx, url in enumerate(candidate_urls):
+                    try:
+                        logger.info(f"正在从 {url} 获取 Anthropic 模型列表")
+                        response = await client.get(url, headers=headers)
+                        response.raise_for_status()
+                        data = response.json()
+                        models = [
+                            {
+                                "value": m["id"],
+                                "label": m["id"],
+                                "description": m.get("display_name", "")
+                            }
+                            for m in data.get("data", [])
+                            if m.get("id")
+                        ]
+                        break
+                    except httpx.HTTPStatusError as e:
+                        last_http_error = e
+                        is_last_candidate = idx == len(candidate_urls) - 1
+                        if e.response.status_code == 404 and not is_last_candidate:
+                            logger.warning(f"Anthropic 模型地址 {url} 返回 404，尝试备用地址")
+                            continue
+                        raise
+
+                if not models:
+                    if last_http_error:
+                        raise last_http_error
+                    raise HTTPException(status_code=404, detail="未能从 Anthropic API 获取到可用模型列表")
+
                 return {"provider": provider, "models": models, "count": len(models)}
             
             elif provider == "gemini":

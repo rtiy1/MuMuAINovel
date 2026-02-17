@@ -33,7 +33,8 @@ class Settings(BaseSettings):
     
     # 日志配置
     log_level: str = "INFO"  # DEBUG, INFO, WARNING, ERROR, CRITICAL
-    log_to_file: bool = True  # 是否输出到文件
+    # Vercel 运行环境为只读文件系统，默认关闭文件日志
+    log_to_file: bool = os.getenv("VERCEL", "").lower() not in ("1", "true", "yes")
     log_file_path: str = str(PROJECT_ROOT / "logs" / "app.log")
     log_max_bytes: int = 10 * 1024 * 1024  # 10MB
     log_backup_count: int = 30  # 保留30个备份文件

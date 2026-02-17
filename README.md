@@ -177,6 +177,49 @@ docker-compose up -d
 > 2. **数据库初始化**: `init_postgres.sql` 会在首次启动时自动执行，安装必要的PostgreSQL扩展
 > 3. **自行构建**: 如需从源码构建，请先下载 embedding 模型文件（[加群获取](frontend/public/qq.jpg)）
 
+### Vercel 部署（前后端一体）
+
+本仓库已支持直接部署到 Vercel（前后端同一个项目）：
+
+```bash
+# 1. 推送代码到 GitHub
+git push
+
+# 2. 在 Vercel 导入该仓库
+# Framework Preset 选 Other
+# Root Directory 选仓库根目录（MuMuAINovel）
+```
+
+#### Vercel 必填环境变量
+
+```bash
+# 必填：外部 PostgreSQL（建议 Neon / Supabase）
+DATABASE_URL=postgresql+asyncpg://<user>:<password>@<host>/<db>?sslmode=require
+
+# 建议：Vercel 上关闭文件日志（只读文件系统）
+LOG_TO_FILE=false
+
+# 必填：至少配置一个 AI Provider Key
+OPENAI_API_KEY=sk-...
+# 或
+ANTHROPIC_API_KEY=sk-ant-...
+# 或
+GEMINI_API_KEY=...
+```
+
+#### 如果启用 LinuxDO OAuth，还需要
+
+```bash
+FRONTEND_URL=https://<your-vercel-domain>
+LINUXDO_REDIRECT_URI=https://<your-vercel-domain>/api/auth/callback
+```
+
+#### 部署说明
+
+- `vercel.json` 会自动执行前端构建：`npm --prefix frontend ci && npm --prefix frontend run build`
+- 前端产物输出到 `backend/static`
+- 所有请求由 `api/index.py` 进入 FastAPI（包含 `/api/*` 与 SPA 页面）
+
 ### 使用 Docker Hub 镜像（推荐新手）
 
 ```bash

@@ -272,7 +272,7 @@ export default function SettingsPage() {
 
   const apiProviders = [
     { value: 'openai', label: 'OpenAI Compatible', defaultUrl: 'https://api.openai.com/v1' },
-    // { value: 'anthropic', label: 'Anthropic (Claude)', defaultUrl: 'https://api.anthropic.com' },
+    { value: 'anthropic', label: 'Anthropic (Claude)', defaultUrl: 'https://api.anthropic.com' },
     { value: 'gemini', label: 'Google Gemini', defaultUrl: 'https://generativelanguage.googleapis.com/v1beta' },
   ];
 
@@ -768,8 +768,8 @@ export default function SettingsPage() {
     switch (provider) {
       case 'openai':
         return 'blue';
-      // case 'anthropic':
-      //   return 'purple';
+      case 'anthropic':
+        return 'orange';
       case 'gemini':
         return 'green';
       default:
@@ -1089,15 +1089,19 @@ export default function SettingsPage() {
                               <Space size={4}>
                                 <span>模型名称</span>
                                 <InfoCircleOutlined
-                                  title="AI模型的名称，如 gpt-4, gpt-3.5-turbo"
+                                  title="AI模型的名称，支持手动输入，例如 gpt-4、claude-3-7-sonnet-20250219"
                                   style={{ color: 'var(--color-text-secondary)', fontSize: isMobile ? '12px' : '14px' }}
                                 />
                               </Space>
                             }
                             name="llm_model"
                             rules={[{ required: true, message: '请输入或选择模型名称' }]}
+                            normalize={(value) => Array.isArray(value) ? value[0] : value}
+                            getValueProps={(value) => ({ value: value ? [value] : [] })}
                           >
                             <Select
+                              mode="tags"
+                              maxCount={1}
                               size={isMobile ? 'middle' : 'large'}
                               showSearch
                               placeholder={isMobile ? "选择模型" : "输入模型名称或点击获取"}
@@ -1536,8 +1540,11 @@ export default function SettingsPage() {
                   style={{ marginBottom: 16 }}
                 >
                   <Select placeholder="选择提供商" onChange={handlePresetProviderChange}>
-                    <Select.Option value="openai">OpenAI</Select.Option>
-                    <Select.Option value="gemini">Google Gemini</Select.Option>
+                    {apiProviders.map(provider => (
+                      <Select.Option key={provider.value} value={provider.value}>
+                        {provider.label}
+                      </Select.Option>
+                    ))}
                   </Select>
                 </Form.Item>
               </Col>
@@ -1591,8 +1598,12 @@ export default function SettingsPage() {
                   }
                   rules={[{ required: true, message: '请选择或输入模型名称' }]}
                   style={{ marginBottom: 16 }}
+                  normalize={(value) => Array.isArray(value) ? value[0] : value}
+                  getValueProps={(value) => ({ value: value ? [value] : [] })}
                 >
                   <Select
+                    mode="tags"
+                    maxCount={1}
                     showSearch
                     placeholder="点击获取模型列表或直接输入"
                     optionFilterProp="label"

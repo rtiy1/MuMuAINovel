@@ -1,4 +1,5 @@
 """Anthropic 客户端"""
+import json
 from typing import Any, AsyncGenerator, Dict, Optional
 
 from anthropic import AsyncAnthropic
@@ -19,6 +20,64 @@ class AnthropicClient:
             kwargs["base_url"] = base_url
         self.client = AsyncAnthropic(**kwargs)
 
+    @staticmethod
+    def _stringify_arguments(arguments: Any) -> str:
+        """将工具参数统一为 JSON 字符串，便于与 MCP 调用链对齐。"""
+        if isinstance(arguments, str):
+            return arguments
+        if arguments is None:
+            return ""
+        try:
+            return json.dumps(arguments, ensure_ascii=False)
+        except Exception:
+            return str(arguments)
+
+    @staticmethod
+    def _convert_tools_for_anthropic(tools: list) -> list:
+        """
+        将 OpenAI Function Calling 工具格式转换为 Anthropic 工具格式。
+
+        支持两种输入：
+        1. OpenAI: {"type":"function","function":{"name","description","parameters"}}
+        2. Anthropic: {"name","description","input_schema"}
+        """
+        converted = []
+        for tool in tools:
+            if not isinstance(tool, dict):
+                continue
+
+            # Anthropic 原生格式
+            if "name" in tool and "input_schema" in tool:
+                converted.append({
+                    "name": tool.get("name", ""),
+                    "description": tool.get("description", ""),
+                    "input_schema": tool.get("input_schema") or {"type": "object", "properties": {}},
+                })
+                continue
+
+            # OpenAI Function Calling 格式
+            function = tool.get("function")
+            if isinstance(function, dict):
+                parameters = function.get("parameters") or {"type": "object", "properties": {}}
+                if isinstance(parameters, dict):
+                    parameters = {k: v for k, v in parameters.items() if k != "$schema"}
+                converted.append({
+                    "name": function.get("name", ""),
+                    "description": function.get("description", ""),
+                    "input_schema": parameters,
+                })
+
+        return converted
+
+    @staticmethod
+    def _build_tool_choice(tool_choice: Optional[str]) -> Optional[Dict[str, str]]:
+        """将通用 tool_choice 映射到 Anthropic 格式。"""
+        if tool_choice == "required":
+            return {"type": "any"}
+        if tool_choice == "auto":
+            return {"type": "auto"}
+        return None
+
     async def chat_completion(
         self,
         messages: list,
@@ -37,12 +96,13 @@ class AnthropicClient:
         }
         if system_prompt:
             kwargs["system"] = system_prompt
-        if tools:
-            kwargs["tools"] = tools
-            if tool_choice == "required":
-                kwargs["tool_choice"] = {"type": "any"}
-            elif tool_choice == "auto":
-                kwargs["tool_choice"] = {"type": "auto"}
+        if tools and tool_choice != "none":
+            anthropic_tools = self._convert_tools_for_anthropic(tools)
+            if anthropic_tools:
+                kwargs["tools"] = anthropic_tools
+                choice = self._build_tool_choice(tool_choice)
+                if choice:
+                    kwargs["tool_choice"] = choice
 
         response = await self.client.messages.create(**kwargs)
 
@@ -53,7 +113,10 @@ class AnthropicClient:
                 tool_calls.append({
                     "id": block.id,
                     "type": "function",
-                    "function": {"name": block.name, "arguments": block.input},
+                    "function": {
+                        "name": block.name,
+                        "arguments": self._stringify_arguments(block.input),
+                    },
                 })
             elif block.type == "text":
                 content += block.text
@@ -91,42 +154,39 @@ class AnthropicClient:
         }
         if system_prompt:
             kwargs["system"] = system_prompt
-        if tools:
-            kwargs["tools"] = tools
-            if tool_choice == "required":
-                kwargs["tool_choice"] = {"type": "any"}
-            elif tool_choice == "auto":
-                kwargs["tool_choice"] = {"type": "auto"}
+        if tools and tool_choice != "none":
+            anthropic_tools = self._convert_tools_for_anthropic(tools)
+            if anthropic_tools:
+                kwargs["tools"] = anthropic_tools
+                choice = self._build_tool_choice(tool_choice)
+                if choice:
+                    kwargs["tool_choice"] = choice
 
         try:
             async with self.client.messages.stream(**kwargs) as stream:
                 try:
+                    # 优先消费文本流，兼容 Anthropic SDK 的事件细节变化
+                    async for text in stream.text_stream:
+                        if text:
+                            yield {"content": text}
+
+                    # 从最终消息中提取工具调用，避免逐事件解析造成兼容问题
+                    final_message = await stream.get_final_message()
                     tool_calls = []
-                    async for chunk in stream:
-                        # 处理不同类型的块
-                        if chunk.type == "text_delta":
-                            yield {"content": chunk.text}
-                        elif chunk.type == "tool_use_delta":
-                            # 工具调用增量
-                            if not tool_calls or tool_calls[-1].get("id") != chunk.id:
-                                tool_calls.append({
-                                    "id": chunk.id,
-                                    "type": "function",
-                                    "function": {
-                                        "name": chunk.name,
-                                        "arguments": ""
-                                    }
-                                })
-                            # 追加参数
-                            if tool_calls[-1]["function"]["arguments"] is None:
-                                tool_calls[-1]["function"]["arguments"] = ""
-                            tool_calls[-1]["function"]["arguments"] += chunk.input_gets_new_text or ""
-                        elif chunk.type == "message_delta":
-                            if chunk.stop_reason:
-                                # 流结束
-                                if tool_calls:
-                                    yield {"tool_calls": tool_calls}
-                                yield {"done": True, "finish_reason": chunk.stop_reason}
+                    for block in final_message.content:
+                        if block.type == "tool_use":
+                            tool_calls.append({
+                                "id": block.id,
+                                "type": "function",
+                                "function": {
+                                    "name": block.name,
+                                    "arguments": self._stringify_arguments(block.input),
+                                },
+                            })
+
+                    if tool_calls:
+                        yield {"tool_calls": tool_calls}
+                    yield {"done": True, "finish_reason": final_message.stop_reason}
                 except GeneratorExit:
                     # 生成器被关闭，这是正常的清理过程
                     logger.debug("Anthropic 流式响应生成器被关闭(GeneratorExit)")

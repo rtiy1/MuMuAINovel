@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
-import { Button, Card, Space, Typography, message, Spin, Form, Input, Tabs } from 'antd';
-import { UserOutlined, LockOutlined } from '@ant-design/icons';
-import { authApi } from '../services/api';
+import { Alert, Button, Card, Form, Input, Space, Spin, Tabs, Typography, message } from 'antd';
+import { LockOutlined, UserOutlined } from '@ant-design/icons';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import AnnouncementModal from '../components/AnnouncementModal';
+import { authApi } from '../services/api';
 
 const { Title, Paragraph } = Typography;
 
@@ -14,44 +14,38 @@ export default function Login() {
   const [checking, setChecking] = useState(true);
   const [localAuthEnabled, setLocalAuthEnabled] = useState(false);
   const [localRegistrationEnabled, setLocalRegistrationEnabled] = useState(false);
-  const [linuxdoEnabled, setLinuxdoEnabled] = useState(false);
+  const [showAnnouncement, setShowAnnouncement] = useState(false);
   const [form] = Form.useForm();
   const [registerForm] = Form.useForm();
-  const [showAnnouncement, setShowAnnouncement] = useState(false);
 
-  // 检查是否已登录和获取认证配置
   useEffect(() => {
     const checkAuth = async () => {
       try {
         await authApi.getCurrentUser();
-        // 已登录，重定向到首页
         const redirect = searchParams.get('redirect') || '/';
         navigate(redirect);
       } catch {
-        // 未登录，获取认证配置
         try {
           const config = await authApi.getAuthConfig();
           setLocalAuthEnabled(config.local_auth_enabled);
           setLocalRegistrationEnabled(!!config.local_auth_allow_registration);
-          setLinuxdoEnabled(config.linuxdo_enabled);
         } catch (error) {
           console.error('获取认证配置失败:', error);
-          // 默认显示LinuxDO登录
-          setLinuxdoEnabled(true);
+          setLocalAuthEnabled(false);
+          setLocalRegistrationEnabled(false);
         }
         setChecking(false);
       }
     };
+
     checkAuth();
   }, [navigate, searchParams]);
 
   const handleLoginSuccess = () => {
-    // 检查是否永久隐藏公告
     const hideForever = localStorage.getItem('announcement_hide_forever');
     const hideToday = localStorage.getItem('announcement_hide_today');
     const today = new Date().toDateString();
 
-    // 如果永久隐藏或今日已隐藏，则不显示公告
     if (hideForever === 'true' || hideToday === today) {
       const redirect = searchParams.get('redirect') || '/';
       navigate(redirect);
@@ -90,41 +84,21 @@ export default function Login() {
     }
   };
 
-  const handleLinuxDOLogin = async () => {
-    try {
-      setLoading(true);
-      const response = await authApi.getLinuxDOAuthUrl();
-
-      // 保存重定向地址到 sessionStorage
-      const redirect = searchParams.get('redirect');
-      if (redirect) {
-        sessionStorage.setItem('login_redirect', redirect);
-      }
-
-      // 跳转到 LinuxDO 授权页面
-      window.location.href = response.auth_url;
-    } catch (error) {
-      console.error('获取授权地址失败:', error);
-      message.error('获取授权地址失败，请稍后重试');
-      setLoading(false);
-    }
+  const handleAnnouncementClose = () => {
+    setShowAnnouncement(false);
+    const redirect = searchParams.get('redirect') || '/';
+    navigate(redirect);
   };
 
-  if (checking) {
-    return (
-      <div style={{
-        display: 'flex',
-        justifyContent: 'center',
-        alignItems: 'center',
-        minHeight: '100vh',
-        background: 'var(--color-bg-base)',
-      }}>
-        <Spin size="large" style={{ color: 'var(--color-primary)' }} />
-      </div>
-    );
-  }
+  const handleDoNotShowToday = () => {
+    const today = new Date().toDateString();
+    localStorage.setItem('announcement_hide_today', today);
+  };
 
-  // 渲染本地登录表单
+  const handleNeverShow = () => {
+    localStorage.setItem('announcement_hide_forever', 'true');
+  };
+
   const renderLocalLogin = () => (
     <Form
       form={form}
@@ -265,67 +239,29 @@ export default function Login() {
     </Form>
   );
 
-  // 渲染LinuxDO登录
-  const renderLinuxDOLogin = () => (
-    <div style={{ padding: '24px 0 8px' }}>
-      <Button
-        type="primary"
-        size="large"
-        icon={
-          <img
-            src="/favicon.ico"
-            alt="LinuxDO"
-            style={{
-              width: 20,
-              height: 20,
-              marginRight: 8,
-              verticalAlign: 'middle',
-            }}
-          />
-        }
-        loading={loading}
-        onClick={handleLinuxDOLogin}
-        block
-        style={{
-          height: 52,
-          fontSize: 16,
-          fontWeight: 600,
-          background: 'var(--color-primary)',
-          border: 'none',
-          borderRadius: '12px',
-          boxShadow: 'var(--shadow-primary)',
-          transition: 'all 0.3s ease',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.transform = 'translateY(-2px)';
-          e.currentTarget.style.boxShadow = 'var(--shadow-elevated)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.transform = 'translateY(0)';
-          e.currentTarget.style.boxShadow = 'var(--shadow-primary)';
-        }}
-      >
-        使用 LinuxDO 登录
-      </Button>
-    </div>
+  const renderDisabledNotice = () => (
+    <Alert
+      type="warning"
+      showIcon
+      message="本地登录未启用"
+      description="请联系管理员开启 LOCAL_AUTH_ENABLED 后再登录。"
+      style={{ marginTop: '24px', textAlign: 'left' }}
+    />
   );
 
-  const handleAnnouncementClose = () => {
-    setShowAnnouncement(false);
-    const redirect = searchParams.get('redirect') || '/';
-    navigate(redirect);
-  };
-
-  const handleDoNotShowToday = () => {
-    // 设置今日不再显示
-    const today = new Date().toDateString();
-    localStorage.setItem('announcement_hide_today', today);
-  };
-
-  const handleNeverShow = () => {
-    // 设置永久不再显示
-    localStorage.setItem('announcement_hide_forever', 'true');
-  };
+  if (checking) {
+    return (
+      <div style={{
+        display: 'flex',
+        justifyContent: 'center',
+        alignItems: 'center',
+        minHeight: '100vh',
+        background: 'var(--color-bg-base)',
+      }}>
+        <Spin size="large" style={{ color: 'var(--color-primary)' }} />
+      </div>
+    );
+  }
 
   return (
     <>
@@ -345,7 +281,6 @@ export default function Login() {
         position: 'relative',
         overflow: 'hidden',
       }}>
-        {/* 装饰性背景元素 */}
         <div style={{
           position: 'absolute',
           top: '-10%',
@@ -387,7 +322,6 @@ export default function Login() {
           }}
         >
           <Space direction="vertical" size="large" style={{ width: '100%', textAlign: 'center' }}>
-            {/* Logo区域 */}
             <div style={{ marginBottom: '8px' }}>
               <div style={{
                 width: '72px',
@@ -422,36 +356,11 @@ export default function Login() {
                 fontSize: '14px',
                 marginBottom: 0,
               }}>
-                {localAuthEnabled && linuxdoEnabled ? '选择登录方式' :
-                  localAuthEnabled ? '使用账户密码登录' :
-                    '使用 LinuxDO 账号登录'}
+                {localAuthEnabled ? '使用账户密码登录' : '本地登录未启用'}
               </Paragraph>
             </div>
 
-            {/* 登录方式 */}
-            {localAuthEnabled && linuxdoEnabled ? (
-              <Tabs
-                defaultActiveKey="local"
-                centered
-                items={[
-                  {
-                    key: 'local',
-                    label: '账户密码',
-                    children: renderLocalLogin(),
-                  },
-                  ...(localRegistrationEnabled ? [{
-                    key: 'register',
-                    label: '注册账号',
-                    children: renderLocalRegister(),
-                  }] : []),
-                  {
-                    key: 'linuxdo',
-                    label: 'LinuxDO',
-                    children: renderLinuxDOLogin(),
-                  },
-                ]}
-              />
-            ) : localAuthEnabled ? (
+            {localAuthEnabled ? (
               localRegistrationEnabled ? (
                 <Tabs
                   defaultActiveKey="local"
@@ -473,10 +382,9 @@ export default function Login() {
                 renderLocalLogin()
               )
             ) : (
-              renderLinuxDOLogin()
+              renderDisabledNotice()
             )}
 
-            {/* 提示信息 */}
             <div style={{
               padding: '16px',
               background: 'rgba(77, 128, 136, 0.08)',

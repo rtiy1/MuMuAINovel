@@ -36,7 +36,7 @@ export interface ChangelogEntry {
 }
 
 const GITHUB_API_BASE = 'https://api.github.com';
-const REPO_OWNER = 'xiamuceer-j';
+const REPO_OWNER = 'rtiy1';
 const REPO_NAME = 'MuMuAINovel';
 
 /**

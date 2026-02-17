@@ -1,10 +1,10 @@
-import { useState, useEffect } from 'react';
-import { Typography, Space, Divider, Badge, Button, Grid } from 'antd';
-import { GithubOutlined, CopyrightOutlined, HeartFilled, ClockCircleOutlined, GiftOutlined } from '@ant-design/icons';
+import { useEffect, useState } from 'react';
+import { Badge, Divider, Grid, Space, Typography } from 'antd';
+import { ClockCircleOutlined, CopyrightOutlined, GithubOutlined, HeartFilled } from '@ant-design/icons';
 import { VERSION_INFO, getVersionString } from '../config/version';
 import { checkLatestVersion } from '../services/versionService';
 
-const { Text, Link } = Typography;
+const { Link, Text } = Typography;
 const { useBreakpoint } = Grid;
 
 interface AppFooterProps {
@@ -19,7 +19,6 @@ export default function AppFooter({ sidebarWidth = 0 }: AppFooterProps) {
   const [releaseUrl, setReleaseUrl] = useState('');
 
   useEffect(() => {
-    // 检查版本更新（每次都重新检查）
     const checkVersion = async () => {
       try {
         const result = await checkLatestVersion();
@@ -27,23 +26,20 @@ export default function AppFooter({ sidebarWidth = 0 }: AppFooterProps) {
         setLatestVersion(result.latestVersion);
         setReleaseUrl(result.releaseUrl);
       } catch {
-        // 静默失败
+        // 版本检查失败时保持静默
       }
     };
 
-    // 延迟3秒后检查，避免影响首次加载
     const timer = setTimeout(checkVersion, 3000);
     return () => clearTimeout(timer);
   }, []);
 
-  // 点击版本号查看更新
   const handleVersionClick = () => {
     if (hasUpdate && releaseUrl) {
       window.open(releaseUrl, '_blank');
     }
   };
 
-  // 计算左边距：桌面端有侧边栏时需要偏移
   const leftOffset = isMobile ? 0 : sidebarWidth;
 
   return (
@@ -59,8 +55,8 @@ export default function AppFooter({ sidebarWidth = 0 }: AppFooterProps) {
         padding: isMobile ? '8px 12px' : '10px 16px',
         zIndex: 100,
         boxShadow: 'var(--shadow-card)',
-        backgroundColor: 'rgba(255, 255, 255, 0.8)', // 半透明背景以支持 backdrop-filter
-        transition: 'left 0.3s ease', // 平滑过渡
+        backgroundColor: 'rgba(255, 255, 255, 0.8)',
+        transition: 'left 0.3s ease',
       }}
     >
       <div
@@ -71,13 +67,12 @@ export default function AppFooter({ sidebarWidth = 0 }: AppFooterProps) {
         }}
       >
         {isMobile ? (
-          // 移动端：紧凑单行布局
           <div style={{
             display: 'flex',
             justifyContent: 'center',
             alignItems: 'center',
             gap: 8,
-            flexWrap: 'wrap'
+            flexWrap: 'wrap',
           }}>
             <Badge dot={hasUpdate} offset={[-8, 2]}>
               <Text
@@ -96,24 +91,6 @@ export default function AppFooter({ sidebarWidth = 0 }: AppFooterProps) {
                 <span>{getVersionString()}</span>
               </Text>
             </Badge>
-            <Divider type="vertical" style={{ margin: '0 4px', borderColor: 'var(--color-border)' }} />
-            <Button
-              type="text"
-              size="small"
-              icon={<GiftOutlined />}
-              onClick={() => window.open('https://mumuverse.space:1588/', '_blank')}
-              style={{
-                color: 'var(--color-text-secondary)',
-                fontSize: 11,
-                height: 24,
-                padding: '0 4px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 4,
-              }}
-            >
-              赞助
-            </Button>
             <Divider type="vertical" style={{ margin: '0 4px', borderColor: 'var(--color-border)' }} />
             <Link
               href={VERSION_INFO.githubUrl}
@@ -140,7 +117,6 @@ export default function AppFooter({ sidebarWidth = 0 }: AppFooterProps) {
             </Text>
           </div>
         ) : (
-          // PC端：完整布局
           <Space
             direction="horizontal"
             size={12}
@@ -148,10 +124,9 @@ export default function AppFooter({ sidebarWidth = 0 }: AppFooterProps) {
             style={{
               display: 'flex',
               justifyContent: 'center',
-              alignItems: 'center'
+              alignItems: 'center',
             }}
           >
-            {/* 版本信息 */}
             <Badge dot={hasUpdate} offset={[-8, 2]}>
               <Text
                 onClick={handleVersionClick}
@@ -161,7 +136,6 @@ export default function AppFooter({ sidebarWidth = 0 }: AppFooterProps) {
                   alignItems: 'center',
                   gap: 6,
                   color: 'var(--color-text-secondary)',
-                  textShadow: 'none',
                   cursor: hasUpdate ? 'pointer' : 'default',
                   transition: 'all 0.3s',
                 }}
@@ -182,7 +156,6 @@ export default function AppFooter({ sidebarWidth = 0 }: AppFooterProps) {
               </Text>
             </Badge>
 
-            {/* GitHub 链接 */}
             <Link
               href={VERSION_INFO.githubUrl}
               target="_blank"
@@ -199,50 +172,6 @@ export default function AppFooter({ sidebarWidth = 0 }: AppFooterProps) {
               <span>GitHub</span>
             </Link>
 
-            {/* LinuxDO 社区 */}
-            <Link
-              href={VERSION_INFO.linuxDoUrl}
-              target="_blank"
-              rel="noopener noreferrer"
-              style={{
-                fontSize: 12,
-                color: 'var(--color-text-secondary)',
-              }}
-            >
-              LinuxDO 社区
-            </Link>
-
-            {/* 赞助按钮 */}
-            <Button
-              type="primary"
-              icon={<GiftOutlined style={{ fontSize: 14 }} />}
-              onClick={() => window.open('https://mumuverse.space:1588/', '_blank')}
-              style={{
-                background: 'var(--color-primary)',
-                border: 'none',
-                boxShadow: '0 4px 12px rgba(77, 128, 136, 0.3)',
-                fontSize: 13,
-                height: 32,
-                padding: '0 20px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: 6,
-                fontWeight: 600,
-                transition: 'all 0.3s',
-              }}
-              onMouseEnter={(e) => {
-                e.currentTarget.style.transform = 'translateY(-2px)';
-                e.currentTarget.style.boxShadow = '0 6px 16px rgba(102, 126, 234, 0.6)';
-              }}
-              onMouseLeave={(e) => {
-                e.currentTarget.style.transform = 'translateY(0)';
-                e.currentTarget.style.boxShadow = '0 4px 12px rgba(102, 126, 234, 0.5)';
-              }}
-            >
-              赞助支持
-            </Button>
-
-            {/* 许可证 */}
             <Link
               href={VERSION_INFO.licenseUrl}
               target="_blank"
@@ -259,7 +188,6 @@ export default function AppFooter({ sidebarWidth = 0 }: AppFooterProps) {
               <span>{VERSION_INFO.license}</span>
             </Link>
 
-            {/* 更新时间 */}
             <Text
               style={{
                 fontSize: 12,
@@ -273,7 +201,6 @@ export default function AppFooter({ sidebarWidth = 0 }: AppFooterProps) {
               <span>{VERSION_INFO.buildTime}</span>
             </Text>
 
-            {/* 致谢信息 */}
             <Text
               style={{
                 fontSize: 12,
@@ -281,7 +208,6 @@ export default function AppFooter({ sidebarWidth = 0 }: AppFooterProps) {
                 alignItems: 'center',
                 gap: 4,
                 color: 'var(--color-text-secondary)',
-                textShadow: '0 1px 3px rgba(0, 0, 0, 0.05)',
               }}
             >
               <span>Made with</span>
@@ -291,7 +217,6 @@ export default function AppFooter({ sidebarWidth = 0 }: AppFooterProps) {
           </Space>
         )}
       </div>
-
     </div>
   );
 }

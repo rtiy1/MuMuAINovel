@@ -16,38 +16,6 @@
 
 ---
 
-<div align="center">
-
-## 💖 支持项目
-
-如果这个项目对你有帮助，欢迎通过以下方式支持开发：
-
-**[☕ 请我喝杯咖啡](https://mumuverse.space:1588/)**
-
-### 🎁 赞助专属权益
-
-| 权益 | 说明 |
-|------|------|
-| 📋 **优先需求响应** | 您的功能需求和问题反馈将获得优先处理 |
-| 🚀 **Windows一键启动** | 获取免安装EXE程序，双击即可使用 |
-| 💬 **专属技术支持** | 加入赞助者内部群，获得远程协助和配置指导 |
-
-### ☕ 赞助金额
-
-| 金额 | 描述 |
-|------|------|
-| ¥5 | 🌶️ 一包辣条 |
-| ¥10 | 🍱 一顿拼好饭 |
-| ¥20 | 🧋 一杯咖啡 |
-| ¥50 | 🍖 一次烧烤 |
-| ¥99 | 🍲 一顿海底捞 |
-
-您的支持是我持续开发的动力！🙏
-
-</div>
-
----
-
 ## ✨ 特性
 
 - 🤖 **多 AI 模型** - 支持 OpenAI、Gemini、Claude 等主流模型
@@ -55,7 +23,7 @@
 - 👥 **角色管理** - 人物关系、组织架构可视化管理
 - 📖 **章节编辑** - 支持创建、编辑、重新生成和润色
 - 🌐 **世界观设定** - 构建完整的故事背景
-- 🔐 **多种登录** - LinuxDO OAuth 或本地账户登录
+- 🔐 **本地登录** - 支持本地账户登录与注册
 - 💾 **PostgreSQL** - 生产级数据库，多用户数据隔离
 - 🐳 **Docker 部署** - 一键启动，开箱即用
 
@@ -76,9 +44,6 @@
 ### 项目管理
 ![项目管理](images/3.png)
 
-### 赞助我 💖
-![赞助我](images/4.png)
-
 </div>
 
 </details>
@@ -94,7 +59,7 @@
 - [x] **章节字数限制** - 用户可设置生成字数
 - [x] **思维链与章节关系图谱** - 可视化章节逻辑关系
 - [x] **根据分析一键重写** - 根据分析建议重新生成
-- [x] **Linux DO 自动创建账号** - OAuth 登录自动生成账号
+- [x] **本地注册登录** - 普通用户可直接注册并登录
 - [x] **职业等级体系** - 自定义职业和等级系统，支持修仙境界、魔法等级等多种体系
 - [x] **角色/组织卡片导入导出** - 单独导出角色和组织卡片，支持跨项目数据共享
 - [x] **伏笔管理** - 智能追踪剧情伏笔，提醒未回收线索，可视化伏笔时间线
@@ -152,7 +117,7 @@
 
 ```bash
 # 1. 克隆项目
-git clone https://github.com/xiamuceer-j/MuMuAINovel.git
+git clone https://github.com/rtiy1/MuMuAINovel.git
 cd MuMuAINovel
 
 # 2. 配置环境变量（必需）
@@ -205,13 +170,6 @@ OPENAI_API_KEY=sk-...
 ANTHROPIC_API_KEY=sk-ant-...
 # 或
 GEMINI_API_KEY=...
-```
-
-#### 如果启用 LinuxDO OAuth，还需要
-
-```bash
-FRONTEND_URL=https://<your-vercel-domain>
-LINUXDO_REDIRECT_URI=https://<your-vercel-domain>/api/auth/callback
 ```
 
 #### 部署说明
@@ -329,10 +287,6 @@ services:
       - DEFAULT_MODEL=${DEFAULT_MODEL:-gpt-4o-mini}
       - DEFAULT_TEMPERATURE=${DEFAULT_TEMPERATURE:-0.7}
       - DEFAULT_MAX_TOKENS=${DEFAULT_MAX_TOKENS:-32000}
-      # LinuxDO OAuth 配置
-      - LINUXDO_CLIENT_ID=${LINUXDO_CLIENT_ID:-11111}
-      - LINUXDO_CLIENT_SECRET=${LINUXDO_CLIENT_SECRET:-11111}
-      - LINUXDO_REDIRECT_URI=${LINUXDO_REDIRECT_URI:-http://localhost:8000/api/auth/linuxdo/callback}
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:8000}
       # 本地账户登录配置
       - LOCAL_AUTH_ENABLED=${LOCAL_AUTH_ENABLED:-true}
@@ -387,9 +341,9 @@ docker-compose up -d
 # backend/embedding/models--sentence-transformers--paraphrase-multilingual-MiniLM-L12-v2/
 #
 # 📥 获取方式：
-# - 加入项目 QQ 群或 Linux DO 讨论区获取下载链接
+# - 加入项目 QQ 群或项目讨论区获取下载链接
 # - 群号：见项目主页
-# - Linux DO：https://linux.do/t/topic/1100112
+# - 项目仓库：https://github.com/rtiy1/MuMuAINovel
 ```
 
 #### 后端
@@ -450,11 +404,6 @@ LOCAL_AUTH_PASSWORD=your_password
 ### 可选配置
 
 ```bash
-# LinuxDO OAuth
-LINUXDO_CLIENT_ID=your_client_id
-LINUXDO_CLIENT_SECRET=your_client_secret
-LINUXDO_REDIRECT_URI=http://localhost:8000/api/auth/callback
-
 # PostgreSQL 连接池（高并发优化）
 DATABASE_POOL_SIZE=30
 DATABASE_MAX_OVERFLOW=20
@@ -571,7 +520,7 @@ MuMuAINovel/
 
 ## 📖 使用指南
 
-1. **登录系统** - 使用本地账户或 LinuxDO 账户
+1. **登录系统** - 使用本地账户登录
 2. **创建项目** - 选择"使用向导创建"
 3. **AI 生成** - 输入基本信息，AI 自动生成大纲和角色
 4. **编辑完善** - 管理角色关系，生成和编辑章节
@@ -595,8 +544,8 @@ MuMuAINovel/
 
 感谢所有为本项目做出贡献的开发者！
 
-<a href="https://github.com/xiamuceer-j/MuMuAINovel/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=xiamuceer-j/MuMuAINovel" />
+<a href="https://github.com/rtiy1/MuMuAINovel/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=rtiy1/MuMuAINovel" />
 </a>
 
 ## 📝 许可证
@@ -619,8 +568,7 @@ MuMuAINovel/
 
 ## 📧 联系方式
 
-- 提交 [Issue](https://github.com/xiamuceer-j/MuMuAINovel/issues)
-- Linux DO [讨论](https://linux.do/t/topic/1106333)
+- 提交 [Issue](https://github.com/rtiy1/MuMuAINovel/issues)
 - 加入QQ群 [QQ群](frontend/public/qq.jpg)
 - 加入WX群 [WX群](frontend/public/WX.png)
 
@@ -636,11 +584,11 @@ Made with ❤️
 
 ## Star History
 
-<a href="https://www.star-history.com/#xiamuceer-j/MuMuAINovel&type=date&legend=top-left">
+<a href="https://www.star-history.com/#rtiy1/MuMuAINovel&type=date&legend=top-left">
  <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=xiamuceer-j/MuMuAINovel&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=xiamuceer-j/MuMuAINovel&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=xiamuceer-j/MuMuAINovel&type=date&legend=top-left" />
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=rtiy1/MuMuAINovel&type=date&theme=dark&legend=top-left" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=rtiy1/MuMuAINovel&type=date&legend=top-left" />
+   <img alt="Star History Chart" src="https://api.star-history.com/svg?repos=rtiy1/MuMuAINovel&type=date&legend=top-left" />
  </picture>
 </a>
 

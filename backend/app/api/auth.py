@@ -1,13 +1,11 @@
 """
-认证 API - LinuxDO OAuth2 登录 + 本地账户登录
+认证 API - 本地账户登录
 """
 from fastapi import APIRouter, HTTPException, Response, Request
-from fastapi.responses import RedirectResponse
 from pydantic import BaseModel, Field
 from typing import Optional
 import hashlib
 from datetime import datetime, timedelta, timezone
-from app.services.oauth_service import LinuxDOOAuthService
 from app.user_manager import user_manager
 from app.user_password import password_manager
 from app.logger import get_logger
@@ -23,17 +21,6 @@ def get_china_now():
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/auth", tags=["认证"])
-
-# OAuth2 服务实例
-oauth_service = LinuxDOOAuthService()
-
-# State 临时存储（生产环境应使用 Redis）
-_state_storage = {}
-
-
-class AuthUrlResponse(BaseModel):
-    auth_url: str
-    state: str
 
 
 class LocalLoginRequest(BaseModel):
@@ -81,7 +68,7 @@ async def get_auth_config():
     return {
         "local_auth_enabled": settings.LOCAL_AUTH_ENABLED,
         "local_auth_allow_registration": settings.LOCAL_AUTH_ALLOW_REGISTRATION,
-        "linuxdo_enabled": bool(settings.LINUXDO_CLIENT_ID and settings.LINUXDO_CLIENT_SECRET)
+        "linuxdo_enabled": False
     }
 
 
@@ -280,144 +267,22 @@ async def local_register(request: LocalRegisterRequest, response: Response):
     )
 
 
-@router.get("/linuxdo/url", response_model=AuthUrlResponse)
+@router.get("/linuxdo/url")
 async def get_linuxdo_auth_url():
-    """获取 LinuxDO 授权 URL"""
-    state = oauth_service.generate_state()
-    auth_url = oauth_service.get_authorization_url(state)
-    
-    # 临时存储 state（5分钟有效）
-    _state_storage[state] = True
-    
-    return AuthUrlResponse(auth_url=auth_url, state=state)
-
-
-async def _handle_callback(
-    code: Optional[str] = None,
-    state: Optional[str] = None,
-    error: Optional[str] = None,
-    response: Response = None
-):
-    """
-    LinuxDO OAuth2 回调处理
-    
-    成功后重定向到前端首页，并设置 user_id Cookie
-    """
-    # 检查是否有错误
-    if error:
-        raise HTTPException(status_code=400, detail=f"授权失败: {error}")
-    
-    # 检查必需参数
-    if not code or not state:
-        raise HTTPException(status_code=400, detail="缺少 code 或 state 参数")
-    
-    # 验证 state（防止 CSRF）
-    if state not in _state_storage:
-        raise HTTPException(status_code=400, detail="无效的 state 参数")
-    
-    # 删除已使用的 state
-    del _state_storage[state]
-    
-    # 1. 使用 code 获取 access_token
-    token_data = await oauth_service.get_access_token(code)
-    if not token_data or "access_token" not in token_data:
-        raise HTTPException(status_code=400, detail="获取访问令牌失败")
-    
-    access_token = token_data["access_token"]
-    
-    # 2. 使用 access_token 获取用户信息
-    user_info = await oauth_service.get_user_info(access_token)
-    if not user_info:
-        raise HTTPException(status_code=400, detail="获取用户信息失败")
-    
-    # 3. 创建或更新用户
-    linuxdo_id = str(user_info.get("id"))
-    username = user_info.get("username", "")
-    display_name = user_info.get("name", username)
-    avatar_url = user_info.get("avatar_url")
-    trust_level = user_info.get("trust_level", 0)
-    
-    user = await user_manager.create_or_update_from_linuxdo(
-        linuxdo_id=linuxdo_id,
-        username=username,
-        display_name=display_name,
-        avatar_url=avatar_url,
-        trust_level=trust_level
-    )
-    
-    # 3.1. 检查是否是首次登录（没有密码记录）
-    is_first_login = not await password_manager.has_password(user.user_id)
-    if is_first_login:
-        logger.info(f"用户 {user.user_id} ({username}) 首次登录，需要初始化密码")
-    
-    # Settings 将在首次访问设置页面时自动创建（延迟初始化）
-    
-    # 4. 设置 Cookie 并重定向到前端回调页面
-    # 使用配置的前端URL，支持不同的部署环境
-    frontend_url = settings.FRONTEND_URL.rstrip('/')
-    redirect_url = f"{frontend_url}/auth/callback"
-    logger.info(f"OAuth回调成功，重定向到前端: {redirect_url}")
-    redirect_response = RedirectResponse(url=redirect_url)
-    
-    # 设置 httponly Cookie（2小时有效）
-    max_age = settings.SESSION_EXPIRE_MINUTES * 60
-    redirect_response.set_cookie(
-        key="user_id",
-        value=user.user_id,
-        max_age=max_age,
-        httponly=True,
-        samesite="lax"
-    )
-    
-    # 设置过期时间戳 Cookie（用于前端判断）
-    china_now = get_china_now()
-    expire_time = china_now + timedelta(minutes=settings.SESSION_EXPIRE_MINUTES)
-    expire_at = int(expire_time.timestamp())
-    
-    logger.info(f"✅ [OAuth登录] 用户 {user.user_id} 登录成功，会话有效期 {settings.SESSION_EXPIRE_MINUTES} 分钟")
-    
-    redirect_response.set_cookie(
-        key="session_expire_at",
-        value=str(expire_at),
-        max_age=max_age,
-        httponly=False,  # 前端需要读取
-        samesite="lax"
-    )
-    
-    # 如果是首次登录，设置标记 Cookie（5分钟有效，仅用于前端显示初始密码提示）
-    if is_first_login:
-        redirect_response.set_cookie(
-            key="first_login",
-            value="true",
-            max_age=300,  # 5分钟有效
-            httponly=False,  # 前端需要读取
-            samesite="lax"
-        )
-        logger.info(f"✅ [OAuth登录] 用户 {user.user_id} 首次登录，已设置 first_login 标记")
-    
-    return redirect_response
+    """LinuxDO 登录已禁用"""
+    raise HTTPException(status_code=403, detail="LinuxDO 登录已禁用")
 
 
 @router.get("/linuxdo/callback")
-async def linuxdo_callback(
-    code: Optional[str] = None,
-    state: Optional[str] = None,
-    error: Optional[str] = None,
-    response: Response = None
-):
-    """LinuxDO OAuth2 回调处理（标准路径）"""
-    return await _handle_callback(code, state, error, response)
+async def linuxdo_callback():
+    """LinuxDO 登录已禁用"""
+    raise HTTPException(status_code=403, detail="LinuxDO 登录已禁用")
 
 
 @router.get("/callback")
-async def callback_alias(
-    code: Optional[str] = None,
-    state: Optional[str] = None,
-    error: Optional[str] = None,
-    response: Response = None
-):
-    """LinuxDO OAuth2 回调处理（兼容路径）"""
-    return await _handle_callback(code, state, error, response)
+async def callback_alias():
+    """LinuxDO 登录已禁用"""
+    raise HTTPException(status_code=403, detail="LinuxDO 登录已禁用")
 
 
 @router.post("/refresh")
@@ -584,70 +449,6 @@ async def initialize_user_password(request: Request, password_req: SetPasswordRe
 
 @router.post("/bind/login", response_model=LocalLoginResponse)
 async def bind_account_login(request: LocalLoginRequest, response: Response):
-    """使用绑定的账号密码登录（LinuxDO授权后绑定的账号）"""
-    # 查找用户
-    all_users = await user_manager.get_all_users()
-    target_user = None
-    
-    logger.info(f"[绑定账号登录] 尝试登录用户名: {request.username}")
-    logger.info(f"[绑定账号登录] 当前共有 {len(all_users)} 个用户")
-    
-    for user in all_users:
-        # 同时检查 users 表的 username 和 user_passwords 表的 username
-        password_username = await password_manager.get_username(user.user_id)
-        logger.info(f"[绑定账号登录] 检查用户 {user.user_id}: users.username={user.username}, passwords.username={password_username}")
-        
-        if user.username == request.username or password_username == request.username:
-            target_user = user
-            logger.info(f"[绑定账号登录] 找到匹配用户: {user.user_id}")
-            break
-    
-    if not target_user:
-        logger.warning(f"[绑定账号登录] 用户名 {request.username} 未找到")
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
-    
-    # 检查是否有密码记录
-    has_pwd = await password_manager.has_password(target_user.user_id)
-    if not has_pwd:
-        logger.warning(f"[绑定账号登录] 用户 {target_user.user_id} 没有设置密码")
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
-    
-    # 验证密码
-    is_valid = await password_manager.verify_password(target_user.user_id, request.password)
-    logger.info(f"[绑定账号登录] 用户 {target_user.user_id} 密码验证结果: {is_valid}")
-    
-    if not is_valid:
-        raise HTTPException(status_code=401, detail="用户名或密码错误")
-    
-    # Settings 将在首次访问设置页面时自动创建（延迟初始化）
-    
-    # 设置 Cookie（2小时有效）
-    max_age = settings.SESSION_EXPIRE_MINUTES * 60
-    response.set_cookie(
-        key="user_id",
-        value=target_user.user_id,
-        max_age=max_age,
-        httponly=True,
-        samesite="lax"
-    )
-    
-    # 设置过期时间戳 Cookie（用于前端判断）
-    china_now = get_china_now()
-    expire_time = china_now + timedelta(minutes=settings.SESSION_EXPIRE_MINUTES)
-    expire_at = int(expire_time.timestamp())
-    
-    logger.info(f"✅ [绑定账号登录] 用户 {target_user.user_id} ({request.username}) 登录成功，会话有效期 {settings.SESSION_EXPIRE_MINUTES} 分钟")
-    
-    response.set_cookie(
-        key="session_expire_at",
-        value=str(expire_at),
-        max_age=max_age,
-        httponly=False,  # 前端需要读取
-        samesite="lax"
-    )
-    
-    return LocalLoginResponse(
-        success=True,
-        message="登录成功",
-        user=target_user.dict()
-    )
+    """LinuxDO 绑定账号登录已禁用"""
+    del request, response
+    raise HTTPException(status_code=403, detail="LinuxDO 登录已禁用")

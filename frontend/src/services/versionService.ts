@@ -32,7 +32,7 @@ function compareVersion(v1: string, v2: string): number {
 export async function checkLatestVersion(): Promise<VersionCheckResult> {
   try {
     // 使用 shields.io 的 GitHub release badge API
-    const badgeUrl = 'https://img.shields.io/github/v/release/xiamuceer-j/MuMuAINovel';
+    const badgeUrl = 'https://img.shields.io/github/v/release/rtiy1/MuMuAINovel';
     
     const response = await fetch(badgeUrl, {
       method: 'GET',
@@ -63,7 +63,7 @@ export async function checkLatestVersion(): Promise<VersionCheckResult> {
         return {
           hasUpdate,
           latestVersion,
-          releaseUrl: `https://github.com/xiamuceer-j/MuMuAINovel/releases/tag/v${latestVersion}`,
+          releaseUrl: `https://github.com/rtiy1/MuMuAINovel/releases/tag/v${latestVersion}`,
         };
       }
     }

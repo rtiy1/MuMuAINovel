@@ -100,6 +100,7 @@ class Settings(BaseSettings):
     
     # 本地账户登录配置
     LOCAL_AUTH_ENABLED: bool = True  # 是否启用本地账户登录
+    LOCAL_AUTH_ALLOW_REGISTRATION: bool = True  # 是否允许本地账户自助注册
     LOCAL_AUTH_USERNAME: Optional[str] = None  # 本地登录用户名
     LOCAL_AUTH_PASSWORD: Optional[str] = None  # 本地登录密码
     LOCAL_AUTH_DISPLAY_NAME: str = "本地用户"  # 本地用户显示名称

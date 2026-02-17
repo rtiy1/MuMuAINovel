@@ -3,7 +3,7 @@
 """
 from fastapi import APIRouter, HTTPException, Response, Request
 from fastapi.responses import RedirectResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 import hashlib
 from datetime import datetime, timedelta, timezone
@@ -42,6 +42,13 @@ class LocalLoginRequest(BaseModel):
     password: str
 
 
+class LocalRegisterRequest(BaseModel):
+    """本地注册请求"""
+    username: str = Field(..., min_length=3, max_length=32, description="用户名")
+    password: str = Field(..., min_length=6, max_length=128, description="密码")
+    display_name: Optional[str] = Field(None, min_length=2, max_length=50, description="显示名称")
+
+
 class LocalLoginResponse(BaseModel):
     """本地登录响应"""
     success: bool
@@ -73,6 +80,7 @@ async def get_auth_config():
     """获取认证配置信息"""
     return {
         "local_auth_enabled": settings.LOCAL_AUTH_ENABLED,
+        "local_auth_allow_registration": settings.LOCAL_AUTH_ALLOW_REGISTRATION,
         "linuxdo_enabled": bool(settings.LINUXDO_CLIENT_ID and settings.LINUXDO_CLIENT_SECRET)
     }
 
@@ -100,6 +108,11 @@ async def local_login(request: LocalLoginRequest, response: Response):
     
     # 如果找到了 Linux DO 授权的用户
     if target_user:
+        # 检查账号是否被禁用
+        if target_user.trust_level == -1:
+            logger.warning(f"[本地登录] 用户 {target_user.user_id} 已被禁用")
+            raise HTTPException(status_code=403, detail="账号已被禁用")
+
         # 检查是否有密码
         if not await password_manager.has_password(target_user.user_id):
             logger.warning(f"[本地登录] 用户 {target_user.user_id} 没有设置密码")
@@ -181,6 +194,88 @@ async def local_login(request: LocalLoginRequest, response: Response):
     return LocalLoginResponse(
         success=True,
         message="登录成功",
+        user=user.dict()
+    )
+
+
+@router.post("/local/register", response_model=LocalLoginResponse)
+async def local_register(request: LocalRegisterRequest, response: Response):
+    """本地账户注册并自动登录"""
+    if not settings.LOCAL_AUTH_ENABLED:
+        raise HTTPException(status_code=403, detail="本地账户登录未启用")
+
+    if not settings.LOCAL_AUTH_ALLOW_REGISTRATION:
+        raise HTTPException(status_code=403, detail="本地账户注册未启用")
+
+    username = request.username.strip()
+    display_name = (request.display_name or username).strip()
+
+    if len(username) < 3:
+        raise HTTPException(status_code=400, detail="用户名长度至少为 3 个字符")
+
+    if not username.replace("_", "").replace("-", "").replace(".", "").isalnum():
+        raise HTTPException(status_code=400, detail="用户名仅支持字母、数字、下划线、短横线和点")
+
+    # 保留给 .env 本地管理员账号，避免被普通用户抢注
+    if settings.LOCAL_AUTH_USERNAME and username.lower() == settings.LOCAL_AUTH_USERNAME.lower():
+        raise HTTPException(status_code=409, detail="该用户名不可注册")
+
+    # 检查用户名是否已存在（忽略大小写）
+    all_users = await user_manager.get_all_users()
+    target_username = username.lower()
+    for user in all_users:
+        password_username = await password_manager.get_username(user.user_id)
+        if user.username.lower() == target_username:
+            raise HTTPException(status_code=409, detail="用户名已存在")
+        if password_username and password_username.lower() == target_username:
+            raise HTTPException(status_code=409, detail="用户名已存在")
+
+    # 生成本地用户ID（与本地登录保持一致）
+    user_id = f"local_{hashlib.md5(username.encode()).hexdigest()[:16]}"
+
+    # 创建用户（非管理员）
+    user = await user_manager.create_or_update_from_linuxdo(
+        linuxdo_id=user_id,
+        username=username,
+        display_name=display_name,
+        avatar_url=None,
+        trust_level=0
+    )
+
+    # 设置密码
+    await password_manager.set_password(
+        user_id=user.user_id,
+        username=username,
+        password=request.password
+    )
+
+    # 设置登录 Cookie（与本地登录一致）
+    max_age = settings.SESSION_EXPIRE_MINUTES * 60
+    response.set_cookie(
+        key="user_id",
+        value=user.user_id,
+        max_age=max_age,
+        httponly=True,
+        samesite="lax"
+    )
+
+    china_now = get_china_now()
+    expire_time = china_now + timedelta(minutes=settings.SESSION_EXPIRE_MINUTES)
+    expire_at = int(expire_time.timestamp())
+
+    response.set_cookie(
+        key="session_expire_at",
+        value=str(expire_at),
+        max_age=max_age,
+        httponly=False,
+        samesite="lax"
+    )
+
+    logger.info(f"✅ [注册] 用户 {user.user_id} ({username}) 注册并登录成功")
+
+    return LocalLoginResponse(
+        success=True,
+        message="注册成功",
         user=user.dict()
     )
 

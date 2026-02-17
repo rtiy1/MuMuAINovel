@@ -131,10 +131,17 @@ api.interceptors.response.use(
 );
 
 export const authApi = {
-  getAuthConfig: () => api.get<unknown, { local_auth_enabled: boolean; linuxdo_enabled: boolean }>('/auth/config'),
+  getAuthConfig: () => api.get<unknown, { local_auth_enabled: boolean; local_auth_allow_registration: boolean; linuxdo_enabled: boolean }>('/auth/config'),
 
   localLogin: (username: string, password: string) =>
     api.post<unknown, { success: boolean; message: string; user: User }>('/auth/local/login', { username, password }),
+
+  localRegister: (username: string, password: string, displayName?: string) =>
+    api.post<unknown, { success: boolean; message: string; user: User }>('/auth/local/register', {
+      username,
+      password,
+      display_name: displayName,
+    }),
 
   bindAccountLogin: (username: string, password: string) =>
     api.post<unknown, { success: boolean; message: string; user: User }>('/auth/bind/login', { username, password }),

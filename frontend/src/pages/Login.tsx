@@ -13,8 +13,10 @@ export default function Login() {
   const [loading, setLoading] = useState(false);
   const [checking, setChecking] = useState(true);
   const [localAuthEnabled, setLocalAuthEnabled] = useState(false);
+  const [localRegistrationEnabled, setLocalRegistrationEnabled] = useState(false);
   const [linuxdoEnabled, setLinuxdoEnabled] = useState(false);
   const [form] = Form.useForm();
+  const [registerForm] = Form.useForm();
   const [showAnnouncement, setShowAnnouncement] = useState(false);
 
   // 检查是否已登录和获取认证配置
@@ -30,6 +32,7 @@ export default function Login() {
         try {
           const config = await authApi.getAuthConfig();
           setLocalAuthEnabled(config.local_auth_enabled);
+          setLocalRegistrationEnabled(!!config.local_auth_allow_registration);
           setLinuxdoEnabled(config.linuxdo_enabled);
         } catch (error) {
           console.error('获取认证配置失败:', error);
@@ -42,6 +45,21 @@ export default function Login() {
     checkAuth();
   }, [navigate, searchParams]);
 
+  const handleLoginSuccess = () => {
+    // 检查是否永久隐藏公告
+    const hideForever = localStorage.getItem('announcement_hide_forever');
+    const hideToday = localStorage.getItem('announcement_hide_today');
+    const today = new Date().toDateString();
+
+    // 如果永久隐藏或今日已隐藏，则不显示公告
+    if (hideForever === 'true' || hideToday === today) {
+      const redirect = searchParams.get('redirect') || '/';
+      navigate(redirect);
+      return;
+    }
+    setShowAnnouncement(true);
+  };
+
   const handleLocalLogin = async (values: { username: string; password: string }) => {
     try {
       setLoading(true);
@@ -49,22 +67,25 @@ export default function Login() {
 
       if (response.success) {
         message.success('登录成功！');
-
-        // 检查是否永久隐藏公告
-        const hideForever = localStorage.getItem('announcement_hide_forever');
-        const hideToday = localStorage.getItem('announcement_hide_today');
-        const today = new Date().toDateString();
-
-        // 如果永久隐藏或今日已隐藏，则不显示公告
-        if (hideForever === 'true' || hideToday === today) {
-          const redirect = searchParams.get('redirect') || '/';
-          navigate(redirect);
-        } else {
-          setShowAnnouncement(true);
-        }
+        handleLoginSuccess();
       }
     } catch (error) {
       console.error('本地登录失败:', error);
+      setLoading(false);
+    }
+  };
+
+  const handleLocalRegister = async (values: { username: string; displayName?: string; password: string }) => {
+    try {
+      setLoading(true);
+      const response = await authApi.localRegister(values.username, values.password, values.displayName);
+
+      if (response.success) {
+        message.success('注册成功！');
+        handleLoginSuccess();
+      }
+    } catch (error) {
+      console.error('本地注册失败:', error);
       setLoading(false);
     }
   };
@@ -148,6 +169,97 @@ export default function Login() {
           }}
         >
           登录
+        </Button>
+      </Form.Item>
+    </Form>
+  );
+
+  const renderLocalRegister = () => (
+    <Form
+      form={registerForm}
+      onFinish={handleLocalRegister}
+      size="large"
+      style={{ marginTop: '24px' }}
+    >
+      <Form.Item
+        name="username"
+        rules={[
+          { required: true, message: '请输入用户名' },
+          { min: 3, message: '用户名至少 3 个字符' },
+          { max: 32, message: '用户名最多 32 个字符' },
+          { pattern: /^[a-zA-Z0-9_.-]+$/, message: '仅支持字母、数字、下划线、短横线、点' },
+        ]}
+      >
+        <Input
+          prefix={<UserOutlined style={{ color: '#999' }} />}
+          placeholder="用户名"
+          autoComplete="username"
+        />
+      </Form.Item>
+      <Form.Item
+        name="displayName"
+        rules={[
+          { min: 2, message: '显示名称至少 2 个字符' },
+          { max: 50, message: '显示名称最多 50 个字符' },
+        ]}
+      >
+        <Input
+          prefix={<UserOutlined style={{ color: '#999' }} />}
+          placeholder="显示名称（可选）"
+          autoComplete="nickname"
+        />
+      </Form.Item>
+      <Form.Item
+        name="password"
+        rules={[
+          { required: true, message: '请输入密码' },
+          { min: 6, message: '密码至少 6 个字符' },
+        ]}
+      >
+        <Input.Password
+          prefix={<LockOutlined style={{ color: '#999' }} />}
+          placeholder="密码"
+          autoComplete="new-password"
+        />
+      </Form.Item>
+      <Form.Item
+        name="confirmPassword"
+        dependencies={['password']}
+        rules={[
+          { required: true, message: '请再次输入密码' },
+          ({ getFieldValue }) => ({
+            validator(_, value) {
+              if (!value || getFieldValue('password') === value) {
+                return Promise.resolve();
+              }
+              return Promise.reject(new Error('两次输入的密码不一致'));
+            },
+          }),
+        ]}
+      >
+        <Input.Password
+          prefix={<LockOutlined style={{ color: '#999' }} />}
+          placeholder="确认密码"
+          autoComplete="new-password"
+        />
+      </Form.Item>
+      <Form.Item style={{ marginBottom: 0 }}>
+        <Button
+          type="primary"
+          htmlType="submit"
+          loading={loading}
+          block
+          style={{
+            height: 48,
+            fontSize: 16,
+            fontWeight: 600,
+            background: 'var(--color-primary)',
+            border: 'none',
+            borderRadius: '12px',
+            boxShadow: 'var(--shadow-primary)',
+          }}
+        >
+          注册并登录
         </Button>
       </Form.Item>
     </Form>
@@ -327,6 +439,11 @@ export default function Login() {
                     label: '账户密码',
                     children: renderLocalLogin(),
                   },
+                  ...(localRegistrationEnabled ? [{
+                    key: 'register',
+                    label: '注册账号',
+                    children: renderLocalRegister(),
+                  }] : []),
                   {
                     key: 'linuxdo',
                     label: 'LinuxDO',
@@ -335,7 +452,26 @@ export default function Login() {
                 ]}
               />
             ) : localAuthEnabled ? (
-              renderLocalLogin()
+              localRegistrationEnabled ? (
+                <Tabs
+                  defaultActiveKey="local"
+                  centered
+                  items={[
+                    {
+                      key: 'local',
+                      label: '账户密码',
+                      children: renderLocalLogin(),
+                    },
+                    {
+                      key: 'register',
+                      label: '注册账号',
+                      children: renderLocalRegister(),
+                    },
+                  ]}
+                />
+              ) : (
+                renderLocalLogin()
+              )
             ) : (
               renderLinuxDOLogin()
             )}

@@ -81,11 +81,16 @@ class UserManager:
             )
             user = result.scalar_one_or_none()
             
-            # 检查是否为初始管理员或本地用户
+            # 检查是否为初始管理员或本地管理员账号
             initial_admin_id = settings.INITIAL_ADMIN_LINUXDO_ID
             is_initial_admin = (initial_admin_id and linuxdo_id == initial_admin_id)
-            is_local_user = user_id.startswith("local_")
-            is_admin = is_initial_admin or is_local_user
+            local_admin_username = settings.LOCAL_AUTH_USERNAME
+            is_local_admin = (
+                user_id.startswith("local_")
+                and bool(local_admin_username)
+                and username == local_admin_username
+            )
+            is_admin = bool(is_initial_admin or is_local_admin)
             
             if user:
                 # 更新现有用户

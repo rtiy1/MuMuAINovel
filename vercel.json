@@ -3,7 +3,6 @@
   "buildCommand": "npm --prefix frontend ci && npm --prefix frontend run build",
   "functions": {
     "api/index.py": {
-      "runtime": "python3.12",
       "maxDuration": 60
     }
   },
@@ -14,4 +13,3 @@
     }
   ]
 }
-

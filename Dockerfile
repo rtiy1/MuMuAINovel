@@ -17,5 +17,8 @@ WORKDIR /app
 # 覆盖后端代码
 COPY backend/ ./
 
+# 复制本地 Skill 目录（写作技能导入依赖）
+COPY skills/ ./skills
+
 # 覆盖前端静态产物
 COPY --from=frontend-builder /frontend/dist ./static

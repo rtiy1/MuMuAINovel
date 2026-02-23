@@ -19,6 +19,7 @@ from app.services.ai_providers.anthropic_provider import AnthropicProvider
 from app.services.ai_providers.gemini_provider import GeminiProvider
 from app.services.ai_providers.base_provider import BaseAIProvider
 from app.services.json_helper import clean_json_response, parse_json
+from app.services.mcp_skill_router import mcp_skill_router
 
 # 导出清理函数
 cleanup_http_clients = cleanup_all_clients
@@ -90,6 +91,7 @@ class AIService:
         self.db_session = db_session
         self._enable_mcp = enable_mcp
         self._cached_tools: Optional[List[Dict]] = None
+        self._cached_tools_routing_key: Optional[str] = None
         self._tools_loaded = False
         
         self._openai_provider: Optional[OpenAIProvider] = None
@@ -138,6 +140,7 @@ class AIService:
         if self._cached_tools is not None:
             logger.info(f"🔧 清理MCP工具缓存，移除 {len(self._cached_tools)} 个工具")
             self._cached_tools = None
+            self._cached_tools_routing_key = None
         else:
             logger.debug(f"🔧 MCP工具缓存已经是空，无需清理")
         
@@ -156,7 +159,12 @@ class AIService:
             return self._gemini_provider
         raise ValueError(f"Provider {p} 未初始化")
 
-    async def _prepare_mcp_tools(self, auto_mcp: bool = True, force_refresh: bool = False) -> Optional[List[Dict]]:
+    async def _prepare_mcp_tools(
+        self,
+        auto_mcp: bool = True,
+        force_refresh: bool = False,
+        task_context: Optional[str] = None
+    ) -> Optional[List[Dict]]:
         """
         预处理MCP工具
         
@@ -171,11 +179,14 @@ class AIService:
             - None: 无可用工具（未配置/未启用/加载失败）
             - List[Dict]: OpenAI格式的工具列表
         """
+        routing_key = mcp_skill_router.build_routing_key(task_context or "")
+
         # 前置条件检查
         if not self._enable_mcp:
             logger.debug(f"🔧 MCP工具未启用 (_enable_mcp=False)")
             # 即使有缓存也清理掉，确保不使用
             self._cached_tools = None
+            self._cached_tools_routing_key = None
             self._tools_loaded = False
             return None
         
@@ -183,6 +194,7 @@ class AIService:
             logger.debug(f"🔧 auto_mcp=False，跳过MCP工具加载")
             # 即使有缓存也清理掉，确保不使用
             self._cached_tools = None
+            self._cached_tools_routing_key = None
             self._tools_loaded = False
             return None
         
@@ -196,9 +208,15 @@ class AIService:
         
         # 使用缓存（只有 enable_mcp=True 时才使用缓存）
         if self._tools_loaded and not force_refresh:
-            if self._cached_tools:
-                logger.debug(f"🔧 使用缓存的MCP工具 ({len(self._cached_tools)}个)")
-            return self._cached_tools
+            if self._cached_tools_routing_key == routing_key:
+                if self._cached_tools:
+                    logger.debug(
+                        f"🔧 使用缓存的MCP工具 ({len(self._cached_tools)}个, routing={routing_key})"
+                    )
+                return self._cached_tools
+            logger.debug(
+                f"🔄 路由键变化，重新加载工具: {self._cached_tools_routing_key} -> {routing_key}"
+            )
         
         try:
             from app.services.mcp_tools_loader import mcp_tools_loader
@@ -206,13 +224,15 @@ class AIService:
             self._cached_tools = await mcp_tools_loader.get_user_tools(
                 user_id=self.user_id,
                 db_session=self.db_session,
+                task_context=task_context,
                 use_cache=True,
                 force_refresh=force_refresh
             )
+            self._cached_tools_routing_key = routing_key
             self._tools_loaded = True
             
             if self._cached_tools:
-                logger.info(f"🔧 已加载 {len(self._cached_tools)} 个MCP工具")
+                logger.info(f"🔧 已加载 {len(self._cached_tools)} 个MCP工具 (routing={routing_key})")
             else:
                 logger.debug(f"📭 用户 {self.user_id} 没有可用的MCP工具")
             
@@ -222,6 +242,7 @@ class AIService:
             logger.warning(f"⚠️ 加载MCP工具失败: {e}")
             self._tools_loaded = True
             self._cached_tools = None
+            self._cached_tools_routing_key = None
             return None
 
     async def _handle_tool_calls(
@@ -355,7 +376,10 @@ class AIService:
         
         # 自动加载MCP工具
         if auto_mcp and tools is None:
-            tools = await self._prepare_mcp_tools(auto_mcp=auto_mcp)
+            tools = await self._prepare_mcp_tools(
+                auto_mcp=auto_mcp,
+                task_context=prompt
+            )
         
         prov = self._get_provider(provider)
         response = await prov.generate(
@@ -421,7 +445,10 @@ class AIService:
         
         # 加载MCP工具
         if auto_mcp:
-            tools_to_use = await self._prepare_mcp_tools(auto_mcp=auto_mcp)
+            tools_to_use = await self._prepare_mcp_tools(
+                auto_mcp=auto_mcp,
+                task_context=prompt
+            )
             if tools_to_use:
                 logger.info(f"🔧 已获取 {len(tools_to_use)} 个MCP工具")
         

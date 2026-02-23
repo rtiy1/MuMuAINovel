@@ -13,6 +13,7 @@ import {
   Typography,
   Row,
   Col,
+  Switch,
 } from 'antd';
 import {
   PlusOutlined,
@@ -23,7 +24,12 @@ import {
 } from '@ant-design/icons';
 import { useStore } from '../store';
 import { writingStyleApi } from '../services/api';
-import type { WritingStyle, WritingStyleCreate, WritingStyleUpdate } from '../types';
+import type {
+  WritingStyle,
+  WritingStyleCreate,
+  WritingStyleUpdate,
+  WritingSkill,
+} from '../types';
 
 const { TextArea } = Input;
 const { Text, Paragraph } = Typography;
@@ -34,7 +40,12 @@ export default function WritingStyles() {
   const [loading, setLoading] = useState(false);
   const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
   const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [isSkillModalOpen, setIsSkillModalOpen] = useState(false);
   const [editingStyle, setEditingStyle] = useState<WritingStyle | null>(null);
+  const [skillStyles, setSkillStyles] = useState<WritingSkill[]>([]);
+  const [skillLoading, setSkillLoading] = useState(false);
+  const [importingSkillSlug, setImportingSkillSlug] = useState<string | null>(null);
+  const [setAsDefaultAfterImport, setSetAsDefaultAfterImport] = useState(true);
   const [createForm] = Form.useForm();
   const [editForm] = Form.useForm();
 
@@ -54,6 +65,10 @@ export default function WritingStyles() {
   useEffect(() => {
     loadStyles();
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentProject?.id]);
+
+  useEffect(() => {
+    setSetAsDefaultAfterImport(!!currentProject?.id);
   }, [currentProject?.id]);
 
   const loadStyles = useCallback(async () => {
@@ -156,6 +171,41 @@ export default function WritingStyles() {
     setIsCreateModalOpen(true);
   };
 
+  const loadSkillStyles = useCallback(async () => {
+    try {
+      setSkillLoading(true);
+      const data = await writingStyleApi.getSkillStyles();
+      setSkillStyles(data);
+    } catch {
+      message.error('加载 Skill 列表失败');
+    } finally {
+      setSkillLoading(false);
+    }
+  }, []);
+
+  const showSkillModal = async () => {
+    setIsSkillModalOpen(true);
+    await loadSkillStyles();
+  };
+
+  const handleImportSkill = async (skill: WritingSkill) => {
+    try {
+      setImportingSkillSlug(skill.slug);
+      const response = await writingStyleApi.importSkillStyle({
+        skill_slug: skill.slug,
+        overwrite_existing: true,
+        set_as_default: !!currentProject?.id && setAsDefaultAfterImport,
+        project_id: currentProject?.id,
+      });
+      message.success(response.message || 'Skill 导入成功');
+      await loadStyles();
+    } catch {
+      message.error('Skill 导入失败');
+    } finally {
+      setImportingSkillSlug(null);
+    }
+  };
+
   const getStyleTypeColor = (styleType: string) => {
     return styleType === 'preset' ? 'blue' : 'purple';
   };
@@ -182,13 +232,18 @@ export default function WritingStyles() {
           <EditOutlined style={{ marginRight: 8 }} />
           写作风格管理
         </h2>
-        <Button
-          type="primary"
-          icon={<PlusOutlined />}
-          onClick={showCreateModal}
-        >
-          创建自定义风格
-        </Button>
+        <Space>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={showCreateModal}
+          >
+            创建自定义风格
+          </Button>
+          <Button onClick={showSkillModal}>
+            一键导入 Skill
+          </Button>
+        </Space>
       </div>
 
       <div style={{ flex: 1, overflowY: 'auto' }}>
@@ -274,6 +329,7 @@ export default function WritingStyles() {
                       <Tag color={getStyleTypeColor(style.style_type)}>
                         {getStyleTypeLabel(style.style_type)}
                       </Tag>
+                      {style.preset_id?.startsWith('skill:') && <Tag color="cyan">Skill</Tag>}
                       {style.is_default && <Tag color="gold">默认</Tag>}
                     </Space>
                     
@@ -421,6 +477,79 @@ export default function WritingStyles() {
             </Space>
           </Form.Item>
         </Form>
+      </Modal>
+
+      {/* 导入 Skill Modal */}
+      <Modal
+        title="一键导入 Skill 风格"
+        open={isSkillModalOpen}
+        onCancel={() => setIsSkillModalOpen(false)}
+        footer={null}
+        centered
+        width={isMobile ? 'calc(100vw - 32px)' : 760}
+        style={isMobile ? { maxWidth: 'calc(100vw - 32px)', margin: '0 16px' } : undefined}
+      >
+        <div style={{ marginBottom: 12 }}>
+          <Text type="secondary">
+            这些 Skill 会被导入为可编辑的写作风格，你可以直接设为当前项目默认风格。
+          </Text>
+        </div>
+
+        <div style={{ marginBottom: 16 }}>
+          <Space>
+            <Text>导入后设为当前项目默认：</Text>
+            <Switch
+              checked={setAsDefaultAfterImport}
+              onChange={setSetAsDefaultAfterImport}
+              disabled={!currentProject?.id}
+            />
+            {!currentProject?.id && <Text type="secondary">（未选择项目时不可设置）</Text>}
+          </Space>
+        </div>
+
+        {skillStyles.length === 0 ? (
+          <Empty description={skillLoading ? '正在加载 Skill...' : '暂无可导入 Skill'} />
+        ) : (
+          <Row gutter={[12, 12]}>
+            {skillStyles.map((skill) => (
+              <Col xs={24} sm={24} md={12} key={skill.slug}>
+                <Card
+                  size="small"
+                  title={
+                    <Space>
+                      <Text strong>{skill.name}</Text>
+                      <Tag color="cyan">{skill.slug}</Tag>
+                    </Space>
+                  }
+                  extra={
+                    <Button
+                      type="primary"
+                      size="small"
+                      loading={importingSkillSlug === skill.slug}
+                      onClick={() => handleImportSkill(skill)}
+                    >
+                      导入
+                    </Button>
+                  }
+                >
+                  <Paragraph
+                    type="secondary"
+                    style={{ marginBottom: 8 }}
+                    ellipsis={{ rows: 2, tooltip: skill.description }}
+                  >
+                    {skill.description}
+                  </Paragraph>
+                  <Paragraph
+                    style={{ marginBottom: 0, background: '#fafafa', padding: 8, borderRadius: 4 }}
+                    ellipsis={{ rows: 4, tooltip: skill.prompt_preview }}
+                  >
+                    {skill.prompt_preview}
+                  </Paragraph>
+                </Card>
+              </Col>
+            ))}
+          </Row>
+        )}
       </Modal>
     </div>
   );

@@ -23,6 +23,7 @@ import json
 from app.user_manager import User
 from app.mcp import mcp_client, MCPPluginConfig, PluginStatus
 from app.services.mcp_test_service import mcp_test_service
+from app.services.mcp_config_parser import build_plugin_data, extract_servers_from_config
 from app.logger import get_logger
 
 logger = get_logger(__name__)
@@ -232,32 +233,33 @@ async def create_plugin_simple(
       "category": "search"
     }
     
-    自动从mcpServers中提取插件名称（取第一个键）
+    兼容以下配置根字段：
+    - mcpServers（标准 MCP）
+    - skills（skill 列表）
+    - skill（单个 skill 或映射）
+
+    自动提取第一个插件名称（取第一个键）
     如果插件已存在，则更新；否则创建新插件
     """
     try:
         # 解析配置JSON
         config = json.loads(data.config_json)
-        
-        # 验证格式
-        if "mcpServers" not in config:
-            raise HTTPException(status_code=400, detail="配置JSON必须包含mcpServers字段")
-        
-        servers = config["mcpServers"]
-        if not servers or len(servers) == 0:
-            raise HTTPException(status_code=400, detail="mcpServers不能为空")
-        
+
+        source_type, servers = extract_servers_from_config(config)
+
         # 自动提取第一个插件名称
         plugin_name = list(servers.keys())[0]
         server_config = servers[plugin_name]
-        
-        logger.info(f"从配置中提取插件名称: {plugin_name}")
-        
-        # 提取配置
-        server_type = server_config.get("type", "http")
-        
-        if server_type not in ["http", "stdio", "streamable_http", "sse"]:
-            raise HTTPException(status_code=400, detail=f"不支持的服务器类型: {server_type}")
+
+        logger.info(f"从配置中提取插件名称: {plugin_name} (source={source_type})")
+
+        # 构建插件数据
+        plugin_data = build_plugin_data(
+            plugin_name=plugin_name,
+            server_config=server_config,
+            enabled=data.enabled,
+            category=data.category
+        )
         
         # 检查插件名是否已存在
         result = await db.execute(
@@ -267,31 +269,6 @@ async def create_plugin_simple(
             )
         )
         existing = result.scalar_one_or_none()
-        
-        # 构建插件数据
-        plugin_data = {
-            "plugin_name": plugin_name,
-            "display_name": plugin_name, 
-            "plugin_type": server_type,
-            "enabled": data.enabled,
-            "category": data.category,
-            "sort_order": 0
-        }
-        
-        if server_type in ["http", "streamable_http", "sse"]:
-            plugin_data["server_url"] = server_config.get("url")
-            plugin_data["headers"] = server_config.get("headers", {})
-            
-            if not plugin_data["server_url"]:
-                raise HTTPException(status_code=400, detail=f"{server_type}类型插件必须提供url字段")
-        
-        elif server_type == "stdio":
-            plugin_data["command"] = server_config.get("command")
-            plugin_data["args"] = server_config.get("args", [])
-            plugin_data["env"] = server_config.get("env", {})
-            
-            if not plugin_data["command"]:
-                raise HTTPException(status_code=400, detail="Stdio类型插件必须提供command字段")
         
         if existing:
             # 更新现有插件

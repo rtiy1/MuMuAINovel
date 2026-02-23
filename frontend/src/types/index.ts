@@ -496,6 +496,29 @@ export interface WritingStyleListResponse {
   total: number;
 }
 
+export interface WritingSkill {
+  slug: string;
+  name: string;
+  description: string;
+  source_path: string;
+  prompt_preview: string;
+}
+
+export interface ImportWritingSkillRequest {
+  skill_slug: string;
+  overwrite_existing?: boolean;
+  set_as_default?: boolean;
+  project_id?: string;
+}
+
+export interface ImportWritingSkillResponse {
+  message: string;
+  created: boolean;
+  default_applied: boolean;
+  skill_slug: string;
+  style: WritingStyle;
+}
+
 export interface PaginationResponse<T> {
   items: T[];
   total: number;

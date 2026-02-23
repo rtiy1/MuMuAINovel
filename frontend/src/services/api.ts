@@ -33,6 +33,9 @@ import type {
   WritingStyleUpdate,
   PresetStyle,
   WritingStyleListResponse,
+  WritingSkill,
+  ImportWritingSkillRequest,
+  ImportWritingSkillResponse,
   PromptWorkshopListResponse,
   PromptWorkshopItem,
   PromptSubmission,
@@ -661,6 +664,14 @@ export const writingStyleApi = {
   // 为项目初始化默认风格（如果没有任何风格）
   initializeDefaultStyles: (projectId: string) =>
     api.post<unknown, WritingStyleListResponse>(`/writing-styles/project/${projectId}/initialize`, {}),
+
+  // 获取可导入的 Skill 风格
+  getSkillStyles: () =>
+    api.get<unknown, WritingSkill[]>('/writing-styles/skills/list'),
+
+  // 导入 Skill 风格
+  importSkillStyle: (data: ImportWritingSkillRequest) =>
+    api.post<unknown, ImportWritingSkillResponse>('/writing-styles/skills/import', data),
 };
 
 export const promptWorkshopApi = {

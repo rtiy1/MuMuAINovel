@@ -13,9 +13,13 @@ from ..schemas.writing_style import (
     WritingStyleUpdate,
     WritingStyleResponse,
     WritingStyleListResponse,
-    SetDefaultStyleRequest
+    SetDefaultStyleRequest,
+    WritingSkillResponse,
+    ImportWritingSkillRequest,
+    ImportWritingSkillResponse
 )
 from ..logger import get_logger
+from ..services.writing_skill_service import writing_skill_service
 
 router = APIRouter(prefix="/writing-styles", tags=["writing-styles"])
 logger = get_logger(__name__)
@@ -61,6 +65,131 @@ async def get_preset_styles(db: AsyncSession = Depends(get_db)):
         }
         for style in preset_styles
     ]
+
+
+@router.get("/skills/list", response_model=List[WritingSkillResponse])
+async def get_writing_skills(
+    request: Request
+):
+    """
+    获取可导入的本地写作 Skill 列表
+    """
+    # 校验登录
+    get_current_user_id(request)
+    return writing_skill_service.list_skills()
+
+
+@router.post("/skills/import", response_model=ImportWritingSkillResponse)
+async def import_writing_skill(
+    request_data: ImportWritingSkillRequest,
+    request: Request,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    一键导入写作 Skill 为用户风格
+
+    规则：
+    - 使用 preset_id=skill:{slug} 做幂等标识
+    - 可选覆盖已有同 slug 风格
+    - 可选导入后设为项目默认风格
+    """
+    user_id = get_current_user_id(request)
+
+    try:
+        skill = writing_skill_service.get_skill(request_data.skill_slug)
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+
+    style_name = f"Skill · {skill.name}"
+    preset_id = f"skill:{skill.slug}"
+    style_description = skill.description
+    style_prompt = skill.prompt_content
+
+    # 查找是否已导入
+    existing_result = await db.execute(
+        select(WritingStyle).where(
+            WritingStyle.user_id == user_id,
+            WritingStyle.preset_id == preset_id
+        )
+    )
+    existing = existing_result.scalar_one_or_none()
+
+    created = False
+    if existing:
+        if not request_data.overwrite_existing:
+            raise HTTPException(status_code=409, detail=f"Skill 已导入且未允许覆盖: {skill.slug}")
+
+        existing.name = style_name
+        existing.style_type = "custom"
+        existing.description = style_description
+        existing.prompt_content = style_prompt
+        style = existing
+    else:
+        count_result = await db.execute(
+            select(func.count(WritingStyle.id))
+            .where(WritingStyle.user_id == user_id)
+        )
+        max_order = count_result.scalar_one()
+
+        style = WritingStyle(
+            user_id=user_id,
+            name=style_name,
+            style_type="custom",
+            preset_id=preset_id,
+            description=style_description,
+            prompt_content=style_prompt,
+            order_index=max_order + 1
+        )
+        db.add(style)
+        created = True
+
+    await db.commit()
+    await db.refresh(style)
+
+    default_applied = False
+    if request_data.set_as_default:
+        if not request_data.project_id:
+            raise HTTPException(status_code=400, detail="set_as_default=true 时必须提供 project_id")
+
+        project_result = await db.execute(
+            select(Project).where(
+                Project.id == request_data.project_id,
+                Project.user_id == user_id
+            )
+        )
+        project = project_result.scalar_one_or_none()
+        if not project:
+            raise HTTPException(status_code=404, detail="项目不存在或无权访问")
+
+        await db.execute(
+            delete(ProjectDefaultStyle).where(ProjectDefaultStyle.project_id == request_data.project_id)
+        )
+        db.add(ProjectDefaultStyle(project_id=request_data.project_id, style_id=style.id))
+        await db.commit()
+        default_applied = True
+
+    response_style = {
+        "id": style.id,
+        "user_id": style.user_id,
+        "name": style.name,
+        "style_type": style.style_type,
+        "preset_id": style.preset_id,
+        "description": style.description,
+        "prompt_content": style.prompt_content,
+        "order_index": style.order_index,
+        "created_at": style.created_at,
+        "updated_at": style.updated_at,
+        "is_default": default_applied
+    }
+
+    action_text = "创建" if created else "更新"
+    return {
+        "message": f"Skill 风格已{action_text}: {skill.name}",
+        "created": created,
+        "default_applied": default_applied,
+        "skill_slug": skill.slug,
+        "style": response_style
+    }
 
 
 @router.post("", response_model=WritingStyleResponse, status_code=201)

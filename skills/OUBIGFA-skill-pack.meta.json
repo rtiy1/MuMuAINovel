@@ -1,0 +1,11 @@
+{
+  "source_repo": "https://github.com/OUBIGFA/De-AI-Prompt-Enhancer-Writer-Booster-SKILL",
+  "source_commit": "fd00fd3c547cf3cb3b1286d350d0d14a8986f497",
+  "ref": "main",
+  "imported_at": "2026-02-23",
+  "imported_dirs": [
+    "good-writing",
+    "de-AI-writing"
+  ],
+  "file_count": 12
+}

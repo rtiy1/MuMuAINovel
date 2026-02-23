@@ -4,7 +4,7 @@
 """
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.logger import get_logger
 from app.models.mcp_plugin import MCPPlugin
 from app.mcp import mcp_client
+from app.services.mcp_skill_router import mcp_skill_router
 
 logger = get_logger(__name__)
 
@@ -21,6 +22,7 @@ class UserToolsCache:
     """用户工具缓存条目"""
     tools: Optional[List[Dict[str, Any]]]
     expire_time: datetime
+    routing_key: str
     hit_count: int = 0
 
 
@@ -48,7 +50,7 @@ class MCPToolsLoader:
         if self._initialized:
             return
         
-        # 用户工具缓存: user_id -> UserToolsCache
+        # 用户工具缓存: {user_id}:{routing_key} -> UserToolsCache
         self._cache: Dict[str, UserToolsCache] = {}
         
         # 缓存TTL（5分钟）
@@ -90,6 +92,7 @@ class MCPToolsLoader:
         self,
         user_id: str,
         db_session: AsyncSession,
+        task_context: Optional[str] = None,
         use_cache: bool = True,
         force_refresh: bool = False
     ) -> Optional[List[Dict[str, Any]]]:
@@ -108,30 +111,37 @@ class MCPToolsLoader:
             - List[Dict]: OpenAI Function Calling格式的工具列表
         """
         now = datetime.now()
+        routing_key = mcp_skill_router.build_routing_key(task_context or "")
+        cache_key = self._get_cache_key(user_id, routing_key)
         
         # 检查缓存
-        if use_cache and not force_refresh and user_id in self._cache:
-            cache_entry = self._cache[user_id]
+        if use_cache and not force_refresh and cache_key in self._cache:
+            cache_entry = self._cache[cache_key]
             if now < cache_entry.expire_time:
                 cache_entry.hit_count += 1
-                logger.debug(f"🎯 用户工具缓存命中: {user_id} (命中次数: {cache_entry.hit_count})")
+                logger.debug(f"🎯 用户工具缓存命中: {cache_key} (命中次数: {cache_entry.hit_count})")
                 return cache_entry.tools
             else:
-                del self._cache[user_id]
-                logger.debug(f"⏰ 用户工具缓存过期: {user_id}")
+                del self._cache[cache_key]
+                logger.debug(f"⏰ 用户工具缓存过期: {cache_key}")
         
         # 从数据库加载
         try:
-            tools = await self._load_user_tools(user_id, db_session)
+            tools = await self._load_user_tools(
+                user_id=user_id,
+                db_session=db_session,
+                task_context=task_context
+            )
             
             # 更新缓存
-            self._cache[user_id] = UserToolsCache(
+            self._cache[cache_key] = UserToolsCache(
                 tools=tools,
-                expire_time=now + self._cache_ttl
+                expire_time=now + self._cache_ttl,
+                routing_key=routing_key
             )
             
             if tools:
-                logger.info(f"🔧 用户 {user_id} 加载了 {len(tools)} 个MCP工具")
+                logger.info(f"🔧 用户 {user_id} 加载了 {len(tools)} 个MCP工具 (routing={routing_key})")
             else:
                 logger.debug(f"📭 用户 {user_id} 没有可用的MCP工具")
             
@@ -144,7 +154,8 @@ class MCPToolsLoader:
     async def _load_user_tools(
         self,
         user_id: str,
-        db_session: AsyncSession
+        db_session: AsyncSession,
+        task_context: Optional[str] = None
     ) -> Optional[List[Dict[str, Any]]]:
         """
         从数据库加载用户启用的MCP插件并获取工具
@@ -161,6 +172,14 @@ class MCPToolsLoader:
         
         if not plugins:
             return None
+
+        routing_profile = None
+        if task_context:
+            plugins, routing_profile = mcp_skill_router.route_plugins(plugins, task_context)
+            logger.debug(
+                f"🎯 Skill 路由完成: matched={routing_profile.matched_categories}, "
+                f"routing_key={routing_profile.routing_key}, selected_plugins={len(plugins)}"
+            )
         
         all_tools = []
         
@@ -194,6 +213,10 @@ class MCPToolsLoader:
                 continue
         
         return all_tools if all_tools else None
+
+    @staticmethod
+    def _get_cache_key(user_id: str, routing_key: str) -> str:
+        return f"{user_id}:{routing_key}"
     
     def invalidate_cache(self, user_id: Optional[str] = None):
         """
@@ -203,9 +226,11 @@ class MCPToolsLoader:
             user_id: 用户ID，为None时清空所有缓存
         """
         if user_id:
-            if user_id in self._cache:
-                del self._cache[user_id]
-                logger.debug(f"🧹 清理用户工具缓存: {user_id}")
+            prefix = f"{user_id}:"
+            removed = [key for key in self._cache if key.startswith(prefix)]
+            for key in removed:
+                del self._cache[key]
+            logger.debug(f"🧹 清理用户工具缓存: {user_id} ({len(removed)}个路由分桶)")
         else:
             count = len(self._cache)
             self._cache.clear()
@@ -220,7 +245,9 @@ class MCPToolsLoader:
             "cache_ttl_minutes": self._cache_ttl.total_seconds() / 60,
             "entries": [
                 {
-                    "user_id": uid,
+                    "cache_key": uid,
+                    "user_id": uid.split(":", 1)[0] if ":" in uid else uid,
+                    "routing_key": e.routing_key,
                     "tools_count": len(e.tools) if e.tools else 0,
                     "hit_count": e.hit_count,
                     "expired": now >= e.expire_time,

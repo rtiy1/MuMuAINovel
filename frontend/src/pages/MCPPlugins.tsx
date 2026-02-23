@@ -167,8 +167,8 @@ export default function MCPPluginsPage() {
       enabled: true,
       category: 'search',
       config_json: `{
-  "mcpServers": {
-    "exa": {
+  "skills": {
+    "exa_search": {
       "type": "http",
       "url": "https://mcp.exa.ai/mcp?exaApiKey=YOUR_API_KEY",
       "headers": {}
@@ -1014,19 +1014,26 @@ export default function MCPPluginsPage() {
               label="MCP配置JSON"
               name="config_json"
               rules={[{ required: true, message: '请输入配置JSON' }]}
-              extra="粘贴标准MCP配置，系统自动提取插件名称。支持HTTP和Stdio类型"
+              extra="粘贴 MCP 或 skill 配置，系统自动提取插件名称。支持 mcpServers / skills / skill，兼容 HTTP 和 Stdio 类型。"
             >
               <TextArea
                 rows={isMobile ? 12 : 16}
                 placeholder={`示例：
 {
-  "mcpServers": {
-    "exa": {
+  "skills": {
+    "exa_search": {
       "type": "streamable_http",
       "url": "https://mcp.exa.ai/mcp?exaApiKey=YOUR_API_KEY",
       "headers": {}
     }
   }
+
+  // 或单个 skill 写法
+  // "skill": {
+  //   "name": "exa_search",
+  //   "type": "streamable_http",
+  //   "url": "https://mcp.exa.ai/mcp?exaApiKey=YOUR_API_KEY"
+  // }
 }`}
                 style={{ fontFamily: 'monospace', fontSize: '13px' }}
               />
